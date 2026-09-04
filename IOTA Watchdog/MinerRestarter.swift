@@ -37,7 +37,7 @@ struct MinerRestarter {
     /// Where the host app lives.
     var appURL: URL = ProcessProbe.hostAppURL
     /// The probe used to confirm the outcome.
-    var probe: any ProcessProbing = ProcessProbe()
+    var probe = ProcessProbe()
 
     /// How long to wait for a graceful quit before forcing it.
     var quitTimeout: TimeInterval = 30

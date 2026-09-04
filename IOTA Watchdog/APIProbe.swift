@@ -26,14 +26,14 @@ struct APIObservation: Equatable {
 /// Looks up one miner by hotkey prefix across every active run.
 struct APIProbe {
 
-    var api: any IOTAAPI = IOTAAPIClient()
+    /// Concrete on purpose — see the note in ProcessProbe about async requirements through
+    /// `any` existentials aborting in optimized builds.
+    var api = IOTAAPIClient()
 
     /// Fetches all runs and finds the miner whose hotkey or coldkey starts with `prefix`.
     /// A single failing run does not fail the whole probe.
     func observe(prefix: String) async -> APIObservation {
-        // Bind the client locally: capturing `self.api` implicitly inside the task group below
-        // crashes at runtime (EXC_BAD_ACCESS in libswift_Concurrency), so keep `self` out of the
-        // concurrent closures entirely.
+        // Bind the client locally so `self` stays out of the concurrent closures below.
         let client = api
 
         let runIDs: [String]
@@ -43,15 +43,15 @@ struct APIProbe {
             return APIObservation(reachable: false)
         }
 
+        // Fetched one run at a time on purpose. The concurrent `withTaskGroup` version worked in
+        // Debug but broke in optimized builds: the child fetches returned nothing and the app
+        // aborted with "Pure virtual function called!" inside Swift's task-completion path.
+        // Eleven sequential requests take a few seconds and this runs once every five minutes,
+        // so the concurrency bought nothing worth that risk.
         var minersByRun: [String: [Miner]] = [:]
-        await withTaskGroup(of: (String, [Miner]).self) { group in
-            for runID in runIDs {
-                group.addTask {
-                    do { return (runID, try await client.fetchMiners(runID: runID)) }
-                    catch { return (runID, []) }
-                }
-            }
-            for await (runID, miners) in group { minersByRun[runID] = miners }
+        for runID in runIDs {
+            do { minersByRun[runID] = try await client.fetchMiners(runID: runID) }
+            catch { minersByRun[runID] = [] }
         }
 
         let tracked = TrackedMiner(label: "local", prefix: prefix)

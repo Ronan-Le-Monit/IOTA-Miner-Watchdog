@@ -32,13 +32,13 @@ struct ProcessSnapshot: Equatable {
     var workerRunning: Bool { !workerPIDs.isEmpty || controlServerHealthy }
 }
 
-/// Anything that can observe the local miner. Injected so the engine is testable.
-protocol ProcessProbing: Sendable {
-    func snapshot() async -> ProcessSnapshot
-}
-
 /// The real probe.
-struct ProcessProbe: ProcessProbing {
+///
+/// Deliberately a concrete type rather than something behind a protocol: calling an **async**
+/// protocol requirement through an `any` existential miscompiles under optimization, and the
+/// Release build aborted with "Pure virtual function called!" seconds after launch. The testable
+/// seam lives in WatchdogEngine, which takes plain `ProcessSnapshot` values.
+struct ProcessProbe {
 
     /// Command-line fragment unique to the miner worker.
     static let workerPattern = "ai.macrocosmos.iota.tah.worker"

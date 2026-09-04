@@ -25,7 +25,7 @@ final class WatchdogCoordinator: ObservableObject {
     let settings: WatchdogSettings
     let power: PowerMonitor
     private let tailer: LogTailer
-    private let probe: any ProcessProbing
+    private let probe: ProcessProbe
     private let apiProbe: APIProbe
     private var restarter: MinerRestarter
     private let logger: WatchdogLogger
@@ -57,7 +57,7 @@ final class WatchdogCoordinator: ObservableObject {
 
     init(settings: WatchdogSettings? = nil,
          tailer: LogTailer = LogTailer(),
-         probe: any ProcessProbing = ProcessProbe(),
+         probe: ProcessProbe = ProcessProbe(),
          apiProbe: APIProbe = APIProbe(),
          restarter: MinerRestarter = MinerRestarter(),
          logger: WatchdogLogger = .shared) {
