@@ -21,6 +21,10 @@ extension WatchdogState {
             case .other: return "Running"
             }
         case .settling(let reason): return "Settling (\(reason))"
+        case .waitingForSync(let until):
+            let formatter = DateFormatter()
+            formatter.dateFormat = "HH:mm"
+            return "Waiting for network sync (~\(formatter.string(from: until)))"
         case .stopped: return "Stopped"
         case .stoppedByUser: return "Stopped by you"
         case .frozen: return "Frozen"
@@ -36,7 +40,7 @@ extension WatchdogState {
     var tint: Color {
         switch self {
         case .training: return Theme.activeGreen
-        case .otherPhase, .settling: return Color(hex: 0xFBBF24)
+        case .otherPhase, .settling, .waitingForSync: return Color(hex: 0xFBBF24)
         case .stopped, .frozen, .needsAttention: return Theme.inactiveRed
         case .notProgressing: return Color(hex: 0xFB923C)
         case .networkOutage: return Color(hex: 0xFB923C)
@@ -51,6 +55,7 @@ extension WatchdogState {
         case .training: return "cube.fill"
         case .otherPhase: return "cube"
         case .settling: return "clock"
+        case .waitingForSync: return "clock.badge"
         case .stopped, .frozen: return "exclamationmark.triangle.fill"
         case .notProgressing: return "exclamationmark.circle"
         case .networkOutage: return "wifi.slash"

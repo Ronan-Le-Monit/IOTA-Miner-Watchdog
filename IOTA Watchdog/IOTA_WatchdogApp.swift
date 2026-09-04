@@ -17,7 +17,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private let statusWindow = StatusWindowController()
 
+    /// The unit tests use this app as their test host (TEST_HOST/BUNDLE_LOADER point at it), so
+    /// every `xcodebuild test` launches the real app — ten times in one run. With auto-restart
+    /// on, those instances went ahead and restarted the user's miner. A test run must never
+    /// touch the miner, so the watchdog does not start under XCTest.
+    private var isRunningTests: Bool {
+        ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+            || ProcessInfo.processInfo.environment["XCTestSessionIdentifier"] != nil
+            || NSClassFromString("XCTestCase") != nil
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
+        guard !isRunningTests else { return }
         MainActor.assumeIsolated {
             let coordinator = WatchdogCoordinator.shared
             coordinator.start()

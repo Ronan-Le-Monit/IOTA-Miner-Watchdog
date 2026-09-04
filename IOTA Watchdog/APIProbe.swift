@@ -21,6 +21,10 @@ struct APIObservation: Equatable {
     var rank: Int?
     var totalInRun: Int?
     var layer: Int?
+    /// When the miner's run last completed a full synchronisation.
+    var lastSyncAt: Date?
+    /// When the run expects its next full synchronisation.
+    var nextSyncAt: Date?
 }
 
 /// Looks up one miner by hotkey prefix across every active run.
@@ -62,6 +66,15 @@ struct APIProbe {
             return APIObservation(reachable: true)
         }
 
+        // The run's synchronisation schedule. A miner that registers mid-epoch cannot train
+        // until the next full sync, so this is what tells us "idle but legitimately waiting".
+        var lastSyncAt: Date?
+        var nextSyncAt: Date?
+        if let sync = try? await client.fetchSync(runID: miner.runId) {
+            lastSyncAt = sync.lastSyncTimestamp.map { Date(timeIntervalSince1970: TimeInterval($0)) }
+            nextSyncAt = sync.nextEstimate.map { Date(timeIntervalSince1970: TimeInterval($0)) }
+        }
+
         return APIObservation(
             reachable: true,
             activationCount: miner.activationCount,
@@ -69,7 +82,9 @@ struct APIProbe {
             runID: miner.runId,
             rank: result.rank,
             totalInRun: result.total,
-            layer: miner.layer + 1        // the API's layer is zero-based
+            layer: miner.layer + 1,       // the API's layer is zero-based
+            lastSyncAt: lastSyncAt,
+            nextSyncAt: nextSyncAt
         )
     }
 }

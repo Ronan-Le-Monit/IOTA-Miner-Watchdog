@@ -193,6 +193,62 @@ final class RestartSuppressionTests: XCTestCase {
                        "a start resets the clock so the grace period governs")
     }
 
+    /// A miner that registers mid-epoch is idle by design until the run's next full sync.
+    /// Restarting there is worse than waiting: it re-registers, misses that sync too, and waits
+    /// for the one after. Reproduces the real timings from 2026-09-04/05.
+    func testIdleAfterRegisteringMidEpochWaitsForTheNextSyncInsteadOfRestarting() {
+        let lastSync = clock.current                       // the run synced ...
+        clock.advance(80 * 60)                             // ... 80 minutes ago
+        let nextSync = lastSync.addingTimeInterval(125 * 60)
+
+        // The miner registers now, i.e. after that sync, then reaches training and goes quiet.
+        engine.ingest([event(.processSpawned), event(.registered(prefix: "5DXDN2UR"))])
+        engine.ingest(running())
+        engine.ingestAPI(activationCount: 1196, reachable: true,
+                         lastSyncAt: lastSync, nextSyncAt: nextSync)
+
+        clock.advance(11 * 60)                             // past the startup grace
+        engine.ingest([event(.chatter)])
+        engine.ingest(running())
+        engine.ingestAPI(activationCount: 1196, reachable: true,
+                         lastSyncAt: lastSync, nextSyncAt: nextSync)
+
+        XCTAssertTrue(engine.isWaitingForSync)
+        XCTAssertEqual(engine.evaluate(), .doNothing, "must not restart while queued for a sync")
+        guard case .waitingForSync = engine.state else {
+            return XCTFail("expected waitingForSync, got \(engine.state)")
+        }
+
+        // Even well past the normal no-progress threshold, it keeps waiting.
+        for _ in 0..<70 {
+            clock.advance(60)
+            engine.ingest([event(.chatter)])
+            engine.ingest(running())
+            engine.ingestAPI(activationCount: 1196, reachable: true,
+                             lastSyncAt: lastSync, nextSyncAt: nextSync)
+        }
+        // The sync estimate plus its grace has now passed, so the rule is live again.
+        guard case .proposeRestart = engine.evaluate() else {
+            return XCTFail("once the sync has come and gone, an idle miner must be restarted")
+        }
+    }
+
+    /// A miner that registered *before* the last sync has no excuse: it should have been training.
+    func testRegisteredBeforeTheLastSyncIsNotExcused() {
+        let registered = clock.current
+        clock.advance(30 * 60)
+        let lastSync = clock.current                       // sync happened after registration
+        let nextSync = clock.current.addingTimeInterval(120 * 60)
+
+        engine.ingest([event(.processSpawned), event(.registered(prefix: "5DXDN2UR"))])
+        _ = registered
+        engine.ingest(running())
+        engine.ingestAPI(activationCount: 500, reachable: true,
+                         lastSyncAt: lastSync, nextSyncAt: nextSync)
+        XCTAssertFalse(engine.isWaitingForSync,
+                       "registration predates the sync, so it is not waiting for one")
+    }
+
     func testBudgetExhaustionIsAlsoReported() {
         settleIntoTraining()
         for _ in 0..<3 {

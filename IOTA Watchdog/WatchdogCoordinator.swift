@@ -144,7 +144,9 @@ final class WatchdogCoordinator: ObservableObject {
             let observation = await apiProbe.observe(prefix: settings.localPrefix)
             lastAPI = observation
             engine.ingestAPI(activationCount: observation.activationCount,
-                             reachable: observation.reachable)
+                             reachable: observation.reachable,
+                             lastSyncAt: observation.lastSyncAt,
+                             nextSyncAt: observation.nextSyncAt)
         }
 
         // 4. Wake information.
@@ -241,9 +243,11 @@ final class WatchdogCoordinator: ObservableObject {
     func confirmRestartNow() async {
         countdownTask?.cancel()
         countdownTask = nil
+        let origin = pendingConfirmation.map { "automatic — \($0.trigger.title)" }
+            ?? "automatic"
         pendingConfirmation = nil
         closeConfirmationPanel()
-        await performRestart()
+        await performRestart(origin: origin)
     }
 
     /// The most useful raw log line to show as evidence.
@@ -261,12 +265,15 @@ final class WatchdogCoordinator: ObservableObject {
 
     /// Restarts the miner now, bypassing the confirmation window (menu action).
     func restartNow() async {
-        await performRestart()
+        await performRestart(origin: "manual — Restart miner now")
     }
 
-    private func performRestart() async {
+    /// `origin` is recorded in the log so a restart can always be attributed afterwards.
+    /// Without it, a hand-triggered restart and an automatic one looked identical in the log.
+    private func performRestart(origin: String) async {
         guard !isRestarting else { return }
         isRestarting = true
+        logger.log("Restart requested (\(origin))")
         engine.recordRestartStarted()
 
         // Logged directly rather than through a Task hop: hopping back to the main actor

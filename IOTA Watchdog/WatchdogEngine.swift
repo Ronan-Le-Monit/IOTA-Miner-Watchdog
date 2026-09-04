@@ -57,6 +57,9 @@ enum WatchdogState: Equatable {
     case otherPhase(MinerPhase)
     /// Recently started or recently woken; too early to judge.
     case settling(reason: String)
+    /// Registered mid-epoch, so it cannot train until the run's next full synchronisation.
+    /// Restarting here is actively harmful: it would miss that sync and wait for the one after.
+    case waitingForSync(until: Date)
     /// The miner is not running.
     case stopped
     /// The user stopped it, or cancelled a restart. No automatic action.
@@ -78,7 +81,8 @@ enum WatchdogState: Equatable {
     var isProblem: Bool {
         switch self {
         case .stopped, .frozen, .notProgressing, .needsAttention: return true
-        case .training, .otherPhase, .settling, .stoppedByUser, .networkOutage, .paused, .unknown:
+        case .training, .otherPhase, .settling, .waitingForSync, .stoppedByUser,
+             .networkOutage, .paused, .unknown:
             return false
         }
     }
@@ -174,6 +178,11 @@ final class WatchdogEngine: ObservableObject {
     private(set) var apiActivationCount: Int?
     private(set) var apiActivationsChangedAt: Date?
     private(set) var apiReachable = true
+    /// The run's synchronisation schedule, from the public API.
+    private(set) var lastSyncAt: Date?
+    private(set) var nextSyncAt: Date?
+    /// When the miner last registered into a run.
+    private(set) var lastRegisteredAt: Date?
 
     // Our own actions.
     private(set) var restartTimes: [Date] = []
@@ -220,6 +229,7 @@ final class WatchdogEngine: ObservableObject {
                 break
 
             case .registered(let prefix):
+                lastRegisteredAt = event.timestamp
                 noteProgress(at: event.timestamp)
                 lastPhase = .training
                 record("Registered in a run\(prefix.isEmpty ? "" : " as \(prefix)")", notable: true)
@@ -285,8 +295,11 @@ final class WatchdogEngine: ObservableObject {
     }
 
     /// Records the latest API observation for the local miner.
-    func ingestAPI(activationCount: Int?, reachable: Bool) {
+    func ingestAPI(activationCount: Int?, reachable: Bool,
+                   lastSyncAt: Date? = nil, nextSyncAt: Date? = nil) {
         apiReachable = reachable
+        if let lastSyncAt { self.lastSyncAt = lastSyncAt }
+        if let nextSyncAt { self.nextSyncAt = nextSyncAt }
         guard let activationCount else { return }
         if activationCount != apiActivationCount {
             apiActivationCount = activationCount
@@ -383,6 +396,15 @@ final class WatchdogEngine: ObservableObject {
             }
         }
 
+        // --- Waiting for the run's next full synchronisation. ---
+        //
+        // A miner that registered mid-epoch is idle by design until the next sync. Restarting
+        // makes it worse: it re-registers, misses that sync too, and waits for the one after.
+        if isWaitingForSync, let next = nextSyncAt {
+            state = .waitingForSync(until: next)
+            return .doNothing
+        }
+
         // --- Rule 4: alive and writing, but no training progress. ---
         if let baseline = progressBaseline {
             let progressAge = currentTime.timeIntervalSince(baseline)
@@ -408,6 +430,22 @@ final class WatchdogEngine: ObservableObject {
     }
 
     // MARK: Restart bookkeeping
+
+    /// True when the miner registered after the run's last full synchronisation, so it is queued
+    /// for the next one and can do nothing until then.
+    ///
+    /// Confirmed in the Macrocosmos docs: a miner that registers waits for the next full
+    /// synchronisation, where it aligns weights and optimiser state, before it processes any
+    /// activations. Observed here: registered 23:58, last sync 22:37, next sync 00:42.
+    var isWaitingForSync: Bool {
+        guard let registered = lastRegisteredAt, let lastSync = lastSyncAt else { return false }
+        guard registered > lastSync else { return false }
+        guard let next = nextSyncAt else { return false }
+        return now() < next.addingTimeInterval(syncGrace)
+    }
+
+    /// Extra time allowed after the estimated sync, since the estimate moves around.
+    private let syncGrace: TimeInterval = 15 * 60
 
     /// The point the no-progress rule measures from: the last real sign of progress, or failing
     /// that the moment this watchdog first saw the worker running.
