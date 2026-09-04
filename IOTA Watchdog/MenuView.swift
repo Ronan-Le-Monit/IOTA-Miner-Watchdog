@@ -90,6 +90,13 @@ struct MenuView: View {
             row("Miner process", coordinator.workerText)
             row("Log age", formatAge(coordinator.logAge))
             row("Last activation", formatAge(engine.lastProgressAt.map { Date().timeIntervalSince($0) }))
+            // Say what will happen and when, rather than looking idle while a timer runs down.
+            if let deadline = engine.noProgressDeadline,
+               let age = engine.progressAge, age > 5 * 60,
+               settings.autoRestartEnabled,
+               deadline > Date() {
+                row("Restart if still idle", deadline.formatted(date: .omitted, time: .shortened))
+            }
             if let api = coordinator.lastAPI {
                 if let rank = api.rank, let total = api.totalInRun {
                     row("Rank", "#\(rank) of \(total)")

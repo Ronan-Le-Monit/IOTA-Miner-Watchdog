@@ -299,7 +299,14 @@ final class WatchdogEngineTests: XCTestCase {
 
         engine.ingest([event(.shutdownComplete)])
         engine.ingest(workerGone())
-        XCTAssertEqual(engine.evaluate(), .doNothing)
+
+        let decision = engine.evaluate()
+        if case .proposeRestart = decision {
+            XCTFail("must not restart once the budget is spent")
+        }
+        guard case .suppressedRestart = decision else {
+            return XCTFail("expected the exhausted budget to be reported, got \(decision)")
+        }
         guard case .needsAttention = engine.state else {
             return XCTFail("expected needsAttention, got \(engine.state)")
         }
@@ -370,13 +377,23 @@ final class WatchdogEngineTests: XCTestCase {
         XCTAssertEqual(engine.state, .settling(reason: "just started"))
     }
 
+    /// With the switch off nothing is restarted, but the reason is reported rather than the
+    /// engine going quiet on a stopped miner.
     func testAutoRestartDisabledNeverProposes() {
         engine.config.autoRestartEnabled = false
         settleIntoTraining()
         engine.ingest([event(.shutdownComplete)])
         clock.advance(30)
         engine.ingest(workerGone())
-        XCTAssertEqual(engine.evaluate(), .doNothing)
+
+        let decision = engine.evaluate()
+        if case .proposeRestart = decision {
+            XCTFail("must not restart while the switch is off")
+        }
+        guard case .suppressedRestart(_, let reason) = decision else {
+            return XCTFail("expected the block to be reported, got \(decision)")
+        }
+        XCTAssertTrue(reason.contains("switched off"), "got: \(reason)")
     }
 
     func testPauseSuppressesEvaluationUntilItExpires() {

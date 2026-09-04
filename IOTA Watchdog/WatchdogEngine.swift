@@ -122,6 +122,9 @@ enum WatchdogDecision: Equatable {
     case proposeRestart(RestartTrigger)
     /// The host app is not running at all: just launch it.
     case launchHostApp
+    /// A restart was warranted but something blocked it. Reported so the log never goes silent
+    /// on a stopped miner, which is exactly what made the first real stall hard to explain.
+    case suppressedRestart(RestartTrigger, reason: String)
 }
 
 /// One thing worth showing in the menu's history.
@@ -158,6 +161,14 @@ final class WatchdogEngine: ObservableObject {
     // Evidence from the probes.
     private(set) var lastSnapshot: ProcessSnapshot?
     private var missingWorkerPolls = 0
+    /// When this watchdog first saw the worker alive.
+    ///
+    /// Needed as a fallback baseline for the no-progress rule: the miner's log keeps only about
+    /// 90 minutes of history and the tailer bootstraps from the tail of it, so after the
+    /// watchdog itself restarts there may be no progress mark at all. Without this, a miner that
+    /// was already idle before the watchdog started would never trip the rule — it would sit
+    /// there forever with the log reading "last progress —".
+    private(set) var firstSeenRunningAt: Date?
 
     // API evidence.
     private(set) var apiActivationCount: Int?
@@ -170,6 +181,8 @@ final class WatchdogEngine: ObservableObject {
     private(set) var userStopped = false
     /// A trigger already proposed and awaiting the user's countdown, so we don't propose twice.
     private(set) var pendingTrigger: RestartTrigger?
+    /// A trigger already reported as suppressed, so the reason is logged once, not every poll.
+    private var suppressedTrigger: RestartTrigger?
 
     /// Wall clock, injectable for tests.
     private let now: () -> Date
@@ -217,7 +230,9 @@ final class WatchdogEngine: ObservableObject {
                 lastFatal = nil
                 userStopped = false
                 pendingTrigger = nil
+                suppressedTrigger = nil
                 missingWorkerPolls = 0
+                firstSeenRunningAt = event.timestamp
                 record("Miner started", notable: true)
 
             case .startRequested:
@@ -262,8 +277,10 @@ final class WatchdogEngine: ObservableObject {
         lastSnapshot = snapshot
         if snapshot.workerRunning {
             missingWorkerPolls = 0
+            if firstSeenRunningAt == nil { firstSeenRunningAt = now() }
         } else {
             missingWorkerPolls += 1
+            firstSeenRunningAt = nil
         }
     }
 
@@ -367,8 +384,8 @@ final class WatchdogEngine: ObservableObject {
         }
 
         // --- Rule 4: alive and writing, but no training progress. ---
-        if let lastProgressAt {
-            let progressAge = currentTime.timeIntervalSince(lastProgressAt)
+        if let baseline = progressBaseline {
+            let progressAge = currentTime.timeIntervalSince(baseline)
             let apiStalled = apiActivationsChangedAt.map {
                 currentTime.timeIntervalSince($0) >= config.noProgressThreshold
             } ?? false
@@ -385,11 +402,29 @@ final class WatchdogEngine: ObservableObject {
 
         // Healthy.
         pendingTrigger = nil
+        suppressedTrigger = nil
         state = lastPhase == .training ? .training : .otherPhase(lastPhase)
         return .doNothing
     }
 
     // MARK: Restart bookkeeping
+
+    /// The point the no-progress rule measures from: the last real sign of progress, or failing
+    /// that the moment this watchdog first saw the worker running.
+    var progressBaseline: Date? {
+        lastProgressAt ?? firstSeenRunningAt
+    }
+
+    /// When the no-progress rule will fire if nothing changes, so the UI can say what is going
+    /// to happen instead of appearing to do nothing.
+    var noProgressDeadline: Date? {
+        progressBaseline?.addingTimeInterval(config.noProgressThreshold)
+    }
+
+    /// How long the miner has gone without any sign of training progress.
+    var progressAge: TimeInterval? {
+        progressBaseline.map { now().timeIntervalSince($0) }
+    }
 
     /// Whether the restart budget allows another attempt.
     func canRestart(at date: Date? = nil) -> Bool {
@@ -406,21 +441,35 @@ final class WatchdogEngine: ObservableObject {
     /// Emits a restart proposal, unless auto-restart is off, the budget is spent, or the same
     /// trigger is already awaiting the user's countdown.
     private func propose(_ trigger: RestartTrigger, at date: Date) -> WatchdogDecision {
-        guard config.autoRestartEnabled else { return .doNothing }
+        guard config.autoRestartEnabled else {
+            return suppress(trigger, "automatic restart is switched off")
+        }
+        guard !userStopped else {
+            return suppress(trigger, "you stopped the miner, or cancelled a restart")
+        }
         guard pendingTrigger != trigger else { return .doNothing }
 
         guard canRestart(at: date) else {
             let recent = restartTimes.filter { date.timeIntervalSince($0) < 3600 }.count
-            state = .needsAttention(
-                reason: recent >= config.maxRestartsPerHour
-                    ? "restarted \(recent) times in the last hour"
-                    : "waiting before another restart")
-            return .doNothing
+            let reason = recent >= config.maxRestartsPerHour
+                ? "restarted \(recent) times in the last hour"
+                : "waiting before another restart"
+            state = .needsAttention(reason: reason)
+            return suppress(trigger, reason)
         }
 
+        suppressedTrigger = nil
         pendingTrigger = trigger
         record("Proposing restart: \(trigger.title)", notable: true)
         return .proposeRestart(trigger)
+    }
+
+    /// Reports a blocked restart once per trigger, so the log explains the inaction.
+    private func suppress(_ trigger: RestartTrigger, _ reason: String) -> WatchdogDecision {
+        guard suppressedTrigger != trigger else { return .doNothing }
+        suppressedTrigger = trigger
+        record("Would restart (\(trigger.title)) but \(reason)", notable: true)
+        return .suppressedRestart(trigger, reason: reason)
     }
 
     /// Called when a restart actually began.

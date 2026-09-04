@@ -71,19 +71,20 @@ final class WatchdogCoordinator: ObservableObject {
         self.power = PowerMonitor()
         self.engine = WatchdogEngine(config: settings.engineConfig)
 
-        // Keep the engine's config in step with the settings.
-        settings.$autoRestartEnabled
-            .sink { [weak self] _ in self?.syncConfig() }
-            .store(in: &cancellables)
-        settings.$noProgressMinutes
-            .sink { [weak self] _ in self?.syncConfig() }
-            .store(in: &cancellables)
-        settings.$frozenMinutes
-            .sink { [weak self] _ in self?.syncConfig() }
-            .store(in: &cancellables)
-
-        settings.$keepAwakeEnabled
-            .sink { [weak self] enabled in self?.power.setKeepAwake(enabled) }
+        // Mirror settings changes into the engine promptly.
+        //
+        // These are delivered asynchronously on purpose. `@Published` fires its publisher from
+        // `willSet`, so a sink that re-reads the property sees the value from *before* the
+        // change. That bug left the engine with auto-restart off after the user switched it on,
+        // and the miner sat stopped without a restart. `poll()` also re-syncs every cycle, so
+        // the engine can never drift from the settings even if a notification is missed.
+        settings.objectWillChange
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] in
+                guard let self else { return }
+                self.syncConfig()
+                self.power.setKeepAwake(self.settings.keepAwakeEnabled)
+            }
             .store(in: &cancellables)
     }
 
@@ -125,6 +126,9 @@ final class WatchdogCoordinator: ObservableObject {
     // MARK: One poll
 
     func poll() async {
+        // 0. The engine's thresholds always come from the current settings.
+        syncConfig()
+
         // 1. Logs.
         let events = tailer.poll()
         if !events.isEmpty { engine.ingest(events) }
@@ -164,7 +168,16 @@ final class WatchdogCoordinator: ObservableObject {
                 + " | worker \(workerText)"
                 + " | log age \(formatAge(logAge))"
                 + " | last progress \(formatAge(engine.lastProgressAt.map { now.timeIntervalSince($0) }))"
-                + (lastAPI?.activationCount.map { " | API activations \($0)" } ?? ""))
+                + (lastAPI?.activationCount.map { " | API activations \($0)" } ?? "")
+                + {
+                    guard settings.autoRestartEnabled,
+                          let deadline = engine.noProgressDeadline,
+                          let age = engine.progressAge, age > 5 * 60,
+                          deadline > now else { return "" }
+                    let formatter = DateFormatter()
+                    formatter.dateFormat = "HH:mm"
+                    return " | will restart at \(formatter.string(from: deadline)) if still idle"
+                }())
         }
 
         switch decision {
@@ -175,6 +188,9 @@ final class WatchdogCoordinator: ObservableObject {
             await performLaunch()
         case .proposeRestart(let trigger):
             beginConfirmation(for: trigger)
+        case .suppressedRestart(let trigger, let reason):
+            logger.log("NOT restarting — \(reason). Trigger: \(trigger.title). \(trigger.detail)")
+            notify(title: "IOTA miner needs attention", body: "\(trigger.title). Not restarting: \(reason).")
         }
     }
 
@@ -253,8 +269,13 @@ final class WatchdogCoordinator: ObservableObject {
         isRestarting = true
         engine.recordRestartStarted()
 
-        let outcome = await restarter.restart { [weak self] message in
-            Task { @MainActor in self?.logger.log("Restart: \(message)") }
+        // Logged directly rather than through a Task hop: hopping back to the main actor
+        // deferred every line until the restart had finished, so they all carried the same
+        // timestamp and the timings were useless for diagnosis. WatchdogLogger is already
+        // safe to call from anywhere.
+        let logger = self.logger
+        let outcome = await restarter.restart { message in
+            logger.log("Restart: \(message)")
         }
 
         isRestarting = false
@@ -278,8 +299,9 @@ final class WatchdogCoordinator: ObservableObject {
         guard !isRestarting else { return }
         isRestarting = true
         engine.recordRestartStarted()
-        let outcome = await restarter.launchHostApp { [weak self] message in
-            Task { @MainActor in self?.logger.log("Launch: \(message)") }
+        let logger = self.logger
+        let outcome = await restarter.launchHostApp { message in
+            logger.log("Launch: \(message)")
         }
         isRestarting = false
         logger.log("Launch outcome: \(outcome)")

@@ -2,8 +2,16 @@
 //  WatchdogSettings.swift
 //  IOTA Watchdog
 //
-//  User-facing settings, persisted in UserDefaults. Thresholds live in WatchdogConfig; this
-//  type owns the ones the user can change and hands the engine a config built from them.
+//  User-facing settings.
+//
+//  Stored as JSON in Application Support rather than UserDefaults: a stale sandbox container
+//  left by the project template intercepts this bundle's preference domain, so UserDefaults
+//  writes did not survive a relaunch (the app read an empty domain on every launch and silently
+//  fell back to the registered defaults). Plain file I/O is unaffected and is what the log and
+//  the first-launch marker already use.
+//
+//  Launch arguments still override any stored value, which keeps `-autoRestartEnabled NO`
+//  usable for testing.
 //
 
 import Foundation
@@ -13,62 +21,90 @@ import ServiceManagement
 @MainActor
 final class WatchdogSettings: ObservableObject {
 
-    private enum Key {
-        static let autoRestart = "autoRestartEnabled"
-        static let keepAwake = "keepAwakeEnabled"
-        static let localPrefix = "localPrefix"
-        static let noProgressMinutes = "noProgressMinutes"
-        static let frozenMinutes = "frozenMinutes"
-        static let countdownSeconds = "confirmationCountdownSeconds"
-        static let notify = "notificationsEnabled"
+    /// The persisted shape. Optional fields so an older file still loads.
+    private struct Stored: Codable {
+        var autoRestartEnabled: Bool?
+        var keepAwakeEnabled: Bool?
+        var localPrefix: String?
+        var noProgressMinutes: Int?
+        var frozenMinutes: Int?
+        var countdownSeconds: Int?
+        var notificationsEnabled: Bool?
     }
 
-    @Published var autoRestartEnabled: Bool {
-        didSet { defaults.set(autoRestartEnabled, forKey: Key.autoRestart) }
-    }
-    @Published var keepAwakeEnabled: Bool {
-        didSet { defaults.set(keepAwakeEnabled, forKey: Key.keepAwake) }
-    }
-    @Published var localPrefix: String {
-        didSet { defaults.set(localPrefix, forKey: Key.localPrefix) }
-    }
-    @Published var noProgressMinutes: Int {
-        didSet { defaults.set(noProgressMinutes, forKey: Key.noProgressMinutes) }
-    }
-    @Published var frozenMinutes: Int {
-        didSet { defaults.set(frozenMinutes, forKey: Key.frozenMinutes) }
-    }
-    @Published var countdownSeconds: Int {
-        didSet { defaults.set(countdownSeconds, forKey: Key.countdownSeconds) }
-    }
-    @Published var notificationsEnabled: Bool {
-        didSet { defaults.set(notificationsEnabled, forKey: Key.notify) }
+    @Published var autoRestartEnabled: Bool { didSet { save() } }
+    @Published var keepAwakeEnabled: Bool { didSet { save() } }
+    @Published var localPrefix: String { didSet { save() } }
+    @Published var noProgressMinutes: Int { didSet { save() } }
+    @Published var frozenMinutes: Int { didSet { save() } }
+    @Published var countdownSeconds: Int { didSet { save() } }
+    @Published var notificationsEnabled: Bool { didSet { save() } }
+
+    private let fileURL: URL
+    /// Suppresses saving while the initial values are being assigned.
+    private var isLoading = true
+
+    init(fileURL: URL? = nil) {
+        let url = fileURL ?? FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/IOTA Watchdog/settings.json")
+        self.fileURL = url
+
+        let stored: Stored
+        if let data = try? Data(contentsOf: url),
+           let decoded = try? JSONDecoder().decode(Stored.self, from: data) {
+            stored = decoded
+        } else {
+            stored = Stored()
+        }
+
+        // Auto-restart is off until the user asks for it: this app force-quits and relaunches
+        // another app, so that should be a deliberate choice.
+        autoRestartEnabled = stored.autoRestartEnabled ?? false
+        keepAwakeEnabled = stored.keepAwakeEnabled ?? true
+        localPrefix = stored.localPrefix ?? "5DXDN2UR"
+        noProgressMinutes = stored.noProgressMinutes ?? 60
+        frozenMinutes = stored.frozenMinutes ?? 5
+        countdownSeconds = stored.countdownSeconds ?? 60
+        notificationsEnabled = stored.notificationsEnabled ?? true
+
+        applyLaunchArgumentOverrides()
+        isLoading = false
     }
 
-    private let defaults: UserDefaults
-
-    init(defaults: UserDefaults = .standard) {
-        self.defaults = defaults
-        defaults.register(defaults: [
-            // Deliberately off on first run: this app force-quits and relaunches another app, so
-            // the user should switch it on knowingly and watch the first restart. One toggle away
-            // in the menu.
-            Key.autoRestart: false,
-            Key.keepAwake: true,
-            Key.localPrefix: "5DXDN2UR",
-            Key.noProgressMinutes: 60,
-            Key.frozenMinutes: 5,
-            Key.countdownSeconds: 60,
-            Key.notify: true
-        ])
-        autoRestartEnabled = defaults.bool(forKey: Key.autoRestart)
-        keepAwakeEnabled = defaults.bool(forKey: Key.keepAwake)
-        localPrefix = defaults.string(forKey: Key.localPrefix) ?? "5DXDN2UR"
-        noProgressMinutes = defaults.integer(forKey: Key.noProgressMinutes)
-        frozenMinutes = defaults.integer(forKey: Key.frozenMinutes)
-        countdownSeconds = defaults.integer(forKey: Key.countdownSeconds)
-        notificationsEnabled = defaults.bool(forKey: Key.notify)
+    /// Command-line overrides win over the stored file, for testing.
+    private func applyLaunchArgumentOverrides() {
+        let arguments = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
+        func bool(_ key: String) -> Bool? {
+            guard let raw = arguments[key] else { return nil }
+            if let value = raw as? Bool { return value }
+            if let value = raw as? String { return (value as NSString).boolValue }
+            if let value = raw as? NSNumber { return value.boolValue }
+            return nil
+        }
+        if let value = bool("autoRestartEnabled") { autoRestartEnabled = value }
+        if let value = bool("keepAwakeEnabled") { keepAwakeEnabled = value }
+        if let value = arguments["localPrefix"] as? String { localPrefix = value }
     }
+
+    private func save() {
+        guard !isLoading else { return }
+        let stored = Stored(autoRestartEnabled: autoRestartEnabled,
+                            keepAwakeEnabled: keepAwakeEnabled,
+                            localPrefix: localPrefix,
+                            noProgressMinutes: noProgressMinutes,
+                            frozenMinutes: frozenMinutes,
+                            countdownSeconds: countdownSeconds,
+                            notificationsEnabled: notificationsEnabled)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        guard let data = try? encoder.encode(stored) else { return }
+        try? FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(),
+                                                 withIntermediateDirectories: true)
+        try? data.write(to: fileURL, options: .atomic)
+    }
+
+    /// Where the settings file lives, for diagnostics.
+    var storageURL: URL { fileURL }
 
     /// The engine configuration implied by these settings.
     var engineConfig: WatchdogConfig {
@@ -83,12 +119,8 @@ final class WatchdogSettings: ObservableObject {
 
     // MARK: Launch at login
 
-    /// Whether the app is registered to start at login.
-    var launchAtLogin: Bool {
-        SMAppService.mainApp.status == .enabled
-    }
+    var launchAtLogin: Bool { SMAppService.mainApp.status == .enabled }
 
-    /// Registers or unregisters the login item. Returns the error text on failure.
     @discardableResult
     func setLaunchAtLogin(_ enabled: Bool) -> String? {
         do {
