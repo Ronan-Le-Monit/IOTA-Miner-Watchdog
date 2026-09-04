@@ -249,6 +249,24 @@ final class RestartSuppressionTests: XCTestCase {
                        "registration predates the sync, so it is not waiting for one")
     }
 
+    /// The registration line is usually gone from the miner's short log by the time it matters,
+    /// so the miner's start time (which survives in main.log) has to stand in for it.
+    func testWaitingForSyncWorksFromTheStartTimeAlone() {
+        let lastSync = clock.current
+        clock.advance(60 * 60)
+        let nextSync = lastSync.addingTimeInterval(125 * 60)
+
+        // Only a spawn event: no registration line survived the log rotation.
+        engine.ingest([event(.processSpawned)])
+        engine.ingest(running())
+        engine.ingestAPI(activationCount: 1196, reachable: true,
+                         lastSyncAt: lastSync, nextSyncAt: nextSync)
+
+        XCTAssertNotNil(engine.joinedRunAt)
+        XCTAssertTrue(engine.isWaitingForSync,
+                      "a miner started after the last sync is queued for the next one")
+    }
+
     func testBudgetExhaustionIsAlsoReported() {
         settleIntoTraining()
         for _ in 0..<3 {

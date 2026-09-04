@@ -438,10 +438,20 @@ final class WatchdogEngine: ObservableObject {
     /// synchronisation, where it aligns weights and optimiser state, before it processes any
     /// activations. Observed here: registered 23:58, last sync 22:37, next sync 00:42.
     var isWaitingForSync: Bool {
-        guard let registered = lastRegisteredAt, let lastSync = lastSyncAt else { return false }
-        guard registered > lastSync else { return false }
+        guard let joined = joinedRunAt, let lastSync = lastSyncAt else { return false }
+        guard joined > lastSync else { return false }
         guard let next = nextSyncAt else { return false }
         return now() < next.addingTimeInterval(syncGrace)
+    }
+
+    /// When this miner joined the current epoch.
+    ///
+    /// Prefers the registration line, but falls back to when the worker was started. The miner's
+    /// own log keeps only about 90 minutes and the tailer reads from its tail, so the
+    /// registration line is often already gone; the start is recorded in main.log, which is
+    /// small enough to be read in full and therefore survives.
+    var joinedRunAt: Date? {
+        lastRegisteredAt ?? lastStartAt
     }
 
     /// Extra time allowed after the estimated sync, since the estimate moves around.
