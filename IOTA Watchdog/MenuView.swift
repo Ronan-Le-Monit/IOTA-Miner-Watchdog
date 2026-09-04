@@ -39,10 +39,17 @@ struct MenuView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("IOTA WATCHDOG")
-                .font(.system(size: 10, weight: .semibold))
-                .tracking(1.4)
-                .foregroundStyle(Theme.titleText)
+            HStack(spacing: 7) {
+                Image("Logo")
+                    .resizable()
+                    .interpolation(.high)
+                    .frame(width: 16, height: 16)
+                    .clipShape(RoundedRectangle(cornerRadius: 4))
+                Text("IOTA WATCHDOG")
+                    .font(.system(size: 10, weight: .semibold))
+                    .tracking(1.4)
+                    .foregroundStyle(Theme.titleText)
+            }
 
             HStack(spacing: 8) {
                 Circle()

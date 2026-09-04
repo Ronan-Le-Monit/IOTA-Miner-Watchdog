@@ -16,9 +16,18 @@ struct RestartConfirmationView: View {
 
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 10) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundStyle(Theme.inactiveRed)
-                    .font(.title2)
+                Image("Logo")
+                    .resizable()
+                    .interpolation(.high)
+                    .frame(width: 28, height: 28)
+                    .clipShape(RoundedRectangle(cornerRadius: 7))
+                    .overlay(alignment: .bottomTrailing) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 12))
+                            .foregroundStyle(Theme.inactiveRed)
+                            .background(Circle().fill(Theme.background).frame(width: 14, height: 14))
+                            .offset(x: 3, y: 3)
+                    }
                 VStack(alignment: .leading, spacing: 2) {
                     Text(pending?.trigger.title ?? "IOTA miner stopped")
                         .font(.headline)
