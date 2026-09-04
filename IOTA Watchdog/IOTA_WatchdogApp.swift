@@ -2,20 +2,21 @@
 //  IOTA_WatchdogApp.swift
 //  IOTA Watchdog
 //
-//  Created by Ronan Leboudec on 04.09.2026.
+//  Menu-bar-only app (LSUIElement) that watches the local IOTA miner and restarts it
+//  when it stops, freezes or stops making progress.
 //
 
 import SwiftUI
-import CoreData
 
 @main
 struct IOTA_WatchdogApp: App {
-    let persistenceController = PersistenceController.shared
-
     var body: some Scene {
-        WindowGroup {
-            ContentView()
-                .environment(\.managedObjectContext, persistenceController.container.viewContext)
+        MenuBarExtra("IOTA Watchdog", systemImage: "cube.transparent") {
+            // Replaced by MenuView once the engine lands.
+            Text("IOTA Watchdog")
+            Divider()
+            Button("Quit") { NSApplication.shared.terminate(nil) }
         }
+        .menuBarExtraStyle(.window)
     }
 }
