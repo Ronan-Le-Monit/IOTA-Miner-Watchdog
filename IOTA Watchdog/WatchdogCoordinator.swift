@@ -55,19 +55,25 @@ final class WatchdogCoordinator: ObservableObject {
     /// How often the API is consulted. The logs are the fast signal; this is the second opinion.
     private let apiInterval: TimeInterval = 5 * 60
 
+    /// Collaborators default to nil rather than to freshly built values.
+    ///
+    /// The project builds with `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`, so these types are
+    /// main-actor isolated, while a default parameter value is evaluated at the call site in a
+    /// nonisolated context. Building them here, inside the isolated initialiser, is both correct
+    /// and warning-free.
     init(settings: WatchdogSettings? = nil,
-         tailer: LogTailer = LogTailer(),
-         probe: ProcessProbe = ProcessProbe(),
-         apiProbe: APIProbe = APIProbe(),
-         restarter: MinerRestarter = MinerRestarter(),
-         logger: WatchdogLogger = .shared) {
+         tailer: LogTailer? = nil,
+         probe: ProcessProbe? = nil,
+         apiProbe: APIProbe? = nil,
+         restarter: MinerRestarter? = nil,
+         logger: WatchdogLogger? = nil) {
         let settings = settings ?? WatchdogSettings()
         self.settings = settings
-        self.tailer = tailer
-        self.probe = probe
-        self.apiProbe = apiProbe
-        self.restarter = restarter
-        self.logger = logger
+        self.tailer = tailer ?? LogTailer()
+        self.probe = probe ?? ProcessProbe()
+        self.apiProbe = apiProbe ?? APIProbe()
+        self.restarter = restarter ?? MinerRestarter()
+        self.logger = logger ?? .shared
         self.power = PowerMonitor()
         self.engine = WatchdogEngine(config: settings.engineConfig)
 

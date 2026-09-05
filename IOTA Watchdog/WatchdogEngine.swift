@@ -198,8 +198,11 @@ final class WatchdogEngine: ObservableObject {
     /// Time the Mac last woke, supplied by PowerMonitor.
     var lastWakeAt: Date?
 
-    init(config: WatchdogConfig = WatchdogConfig(), now: @escaping () -> Date = Date.init) {
-        self.config = config
+    /// `config` defaults to nil for the same reason as the coordinator's collaborators: with
+    /// default main-actor isolation, a `WatchdogConfig()` default argument would be built in a
+    /// nonisolated context.
+    init(config: WatchdogConfig? = nil, now: @escaping () -> Date = Date.init) {
+        self.config = config ?? WatchdogConfig()
         self.now = now
     }
 
