@@ -44,9 +44,16 @@ struct WatchdogConfig: Equatable {
     /// "wait until the estimate" never expires. Seen in the wild: a miner excused for six hours
     /// while the estimate walked from 13:32 to 18:48 and its activation count never moved.
     var syncWaitCap: TimeInterval = 90 * 60
-    /// A miner that keeps resetting and re-registering is broken, not busy.
-    var resetLoopWindow: TimeInterval = 30 * 60
-    var resetLoopThreshold = 3
+    /// A miner that keeps resetting and re-registering *for a long time* is broken, not busy.
+    ///
+    /// Joining a run legitimately involves looping: when a batch of runs goes live, miners can
+    /// cycle through reset and registration for twenty to sixty minutes and then get in fine.
+    /// Restarting during that would be a false positive that costs the run, so the rule needs a
+    /// sustained loop, not a burst — and the API has to agree that nothing is being credited.
+    var resetLoopWindow: TimeInterval = 90 * 60
+    var resetLoopThreshold = 5
+    /// The loop must have been running at least this long. Longer than the observed join period.
+    var resetLoopMinimumDuration: TimeInterval = 60 * 60
     /// Orchestrator-unreachable events within this window that mean "the network is down".
     var outageWindow: TimeInterval = 10 * 60
     var outageEventThreshold = 3
@@ -424,22 +431,6 @@ final class WatchdogEngine: ObservableObject {
             }
         }
 
-        // --- A reset/re-register loop. ---
-        //
-        // Checked before the sync excuse: a miner cycling through reset and registration is
-        // broken regardless of what the sync schedule says, and it produces no activations at
-        // all while it spins.
-        let resets = recentResetCount
-        if resets >= config.resetLoopThreshold {
-            if outageActive {
-                state = .networkOutage
-                return .doNothing
-            }
-            state = .notProgressing
-            return propose(.resetLoop(count: resets,
-                                      minutes: Int(config.resetLoopWindow / 60)),
-                           at: currentTime)
-        }
 
         // --- Waiting for the run's next full synchronisation. ---
         //
@@ -448,6 +439,27 @@ final class WatchdogEngine: ObservableObject {
         if isWaitingForSync, let next = nextSyncAt {
             state = .waitingForSync(until: next)
             return .doNothing
+        }
+
+        // --- A sustained reset/re-register loop. ---
+        //
+        // Deliberately conservative, and deliberately placed *after* the sync excuse. Looping is
+        // normal while joining a run, so this needs three things at once: enough resets, a loop
+        // that has lasted longer than any join period observed, and the public API agreeing that
+        // the miner is being credited with nothing. A wrong restart here slows the whole run,
+        // which is far worse than noticing late.
+        let resets = recentResetCount
+        if resets >= config.resetLoopThreshold,
+           resetLoopDuration >= config.resetLoopMinimumDuration,
+           apiActivationsAreStalled(at: currentTime, for: config.resetLoopMinimumDuration) {
+            if outageActive {
+                state = .networkOutage
+                return .doNothing
+            }
+            state = .notProgressing
+            return propose(.resetLoop(count: resets,
+                                      minutes: Int(resetLoopDuration / 60)),
+                           at: currentTime)
         }
 
         // --- Rule 4: alive and writing, but no training progress. ---
@@ -499,6 +511,14 @@ final class WatchdogEngine: ObservableObject {
         resetTimes.filter { now().timeIntervalSince($0) <= config.resetLoopWindow }.count
     }
 
+    /// How long the current run of resets has been going, measured from the oldest one still
+    /// inside the window. A short burst is a miner joining; hours of it is a miner stuck.
+    var resetLoopDuration: TimeInterval {
+        let inWindow = resetTimes.filter { now().timeIntervalSince($0) <= config.resetLoopWindow }
+        guard let oldest = inWindow.min() else { return 0 }
+        return now().timeIntervalSince(oldest)
+    }
+
     /// When this miner joined the current epoch.
     ///
     /// Prefers the registration line, but falls back to when the worker was started. The miner's
@@ -527,6 +547,14 @@ final class WatchdogEngine: ObservableObject {
     /// How long the miner has gone without any sign of training progress.
     var progressAge: TimeInterval? {
         progressBaseline.map { now().timeIntervalSince($0) }
+    }
+
+    /// True when the public API has credited no new activations for at least `duration`.
+    /// Returns false when we have never had an API reading, so a rule that depends on it
+    /// cannot fire on missing evidence.
+    func apiActivationsAreStalled(at date: Date, for duration: TimeInterval) -> Bool {
+        guard let changed = apiActivationsChangedAt else { return false }
+        return date.timeIntervalSince(changed) >= duration
     }
 
     /// Whether the restart budget allows another attempt.

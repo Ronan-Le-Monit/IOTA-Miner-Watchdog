@@ -33,6 +33,10 @@ It restarts the miner when:
 | Worker vanished | No worker process for two consecutive checks |
 | Frozen | The process is alive but has written nothing for 5 minutes |
 | No progress | Nothing for 60 minutes, confirmed by the API not crediting activations |
+| Sustained reset loop | 5+ resets spanning at least an hour, with the API crediting nothing |
+
+The last two both require the public API to agree before anything happens. Log evidence alone is
+never enough, because a miner can look idle in its log while the network is still crediting it.
 
 Before every automatic restart a window appears with a 60 second countdown, the reason, and the
 log line behind it. Cancel stops it and suspends automatic restarts until the miner runs again.
@@ -49,6 +53,11 @@ cannot start is not thrashed.
 - **It does not restart during a network outage.** If the orchestrator is unreachable a restart
   cannot help, so it holds.
 - **It does not undo a stop you made yourself.** If you press Stop Training, it stays stopped.
+- **It does not restart a miner that is still trying to join a run.** When a batch of runs goes
+  live, joining legitimately involves cycling through reset and registration, sometimes for
+  twenty to sixty minutes, before getting in. That looks identical to a broken miner for the
+  first hour, so the reset-loop rule needs a loop lasting longer than that *and* API
+  confirmation. Thanks to Moonlit on the Macrocosmos Discord for pointing this out.
 - **It ignores the noisy stuff.** NaN losses, stale requests, attestation retries, peer timeouts
   and high GPU memory warnings all look alarming in the log and are all normal.
 
