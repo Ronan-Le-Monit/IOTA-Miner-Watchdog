@@ -269,7 +269,7 @@ final class WatchdogCoordinator: ObservableObject {
         case .fatalError(let reason): return reason
         case .shutdown, .stopped:
             return engine.events.last(where: \.isNotable)?.text ?? trigger.detail
-        case .frozen, .noProgress:
+        case .frozen, .noProgress, .resetLoop:
             return trigger.detail
         }
     }

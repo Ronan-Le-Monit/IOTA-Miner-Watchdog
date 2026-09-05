@@ -38,6 +38,15 @@ struct WatchdogConfig: Equatable {
     var minRestartSpacing: TimeInterval = 10 * 60
     /// Seconds the user gets to cancel an automatic restart.
     var confirmationCountdown: TimeInterval = 60
+    /// Longest the miner is excused for "waiting for the next sync".
+    ///
+    /// The API's next-sync estimate slides forward on every poll, so a rule of the form
+    /// "wait until the estimate" never expires. Seen in the wild: a miner excused for six hours
+    /// while the estimate walked from 13:32 to 18:48 and its activation count never moved.
+    var syncWaitCap: TimeInterval = 90 * 60
+    /// A miner that keeps resetting and re-registering is broken, not busy.
+    var resetLoopWindow: TimeInterval = 30 * 60
+    var resetLoopThreshold = 3
     /// Orchestrator-unreachable events within this window that mean "the network is down".
     var outageWindow: TimeInterval = 10 * 60
     var outageEventThreshold = 3
@@ -95,6 +104,7 @@ enum RestartTrigger: Equatable {
     case stopped
     case frozen(logAge: TimeInterval)
     case noProgress(since: TimeInterval)
+    case resetLoop(count: Int, minutes: Int)
 
     var title: String {
         switch self {
@@ -103,6 +113,7 @@ enum RestartTrigger: Equatable {
         case .stopped: return "IOTA miner is not running"
         case .frozen: return "IOTA miner appears frozen"
         case .noProgress: return "IOTA miner is not making progress"
+        case .resetLoop: return "IOTA miner keeps resetting"
         }
     }
 
@@ -115,6 +126,8 @@ enum RestartTrigger: Equatable {
             return "No log output for \(Int(age / 60)) minutes while the process is alive."
         case .noProgress(let since):
             return "No training progress for \(Int(since / 60)) minutes."
+        case .resetLoop(let count, let minutes):
+            return "Reset and re-registered \(count) times in \(minutes) minutes without training."
         }
     }
 }
@@ -165,6 +178,8 @@ final class WatchdogEngine: ObservableObject {
     // Evidence from the probes.
     private(set) var lastSnapshot: ProcessSnapshot?
     private var missingWorkerPolls = 0
+    /// Times the miner reset its own state, used to spot a reset/re-register loop.
+    private(set) var resetTimes: [Date] = []
     /// When this watchdog first saw the worker alive.
     ///
     /// Needed as a fallback baseline for the no-progress rule: the miner's log keeps only about
@@ -214,12 +229,18 @@ final class WatchdogEngine: ObservableObject {
             lastLogEventAt = max(lastLogEventAt ?? .distantPast, event.timestamp)
 
             switch event.kind {
-            case .submitActivation, .trainingState(.trainingTick):
-                // Activations and training ticks only happen while training, and the miner logs
-                // the move *into* weights_uploading but almost never the move back (17 vs 2 over
-                // three days). Without this the phase would stick at "uploading" forever.
+            case .submitActivation:
+                // An activation is the only unambiguous proof the miner did training work, and
+                // it only happens while training, so it also unsticks the phase: the miner logs
+                // the move *into* weights_uploading but almost never the move back.
                 lastPhase = .training
                 noteProgress(at: event.timestamp)
+
+            case .trainingState(.trainingTick):
+                // Deliberately NOT progress. A miner stuck in a reset/re-register loop emits a
+                // tick as part of each registration, which kept the no-progress clock reset and
+                // hid a miner that had done nothing for six hours.
+                lastPhase = .training
 
             case .layerPhaseChange(let actual, _):
                 lastPhase = actual
@@ -232,8 +253,9 @@ final class WatchdogEngine: ObservableObject {
                 break
 
             case .registered(let prefix):
+                // Registering is not progress either: it is what a looping miner does over and
+                // over. It still marks when the miner joined the run, for the sync rule.
                 lastRegisteredAt = event.timestamp
-                noteProgress(at: event.timestamp)
                 lastPhase = .training
                 record("Registered in a run\(prefix.isEmpty ? "" : " as \(prefix)")", notable: true)
 
@@ -246,15 +268,18 @@ final class WatchdogEngine: ObservableObject {
                 suppressedTrigger = nil
                 missingWorkerPolls = 0
                 firstSeenRunningAt = event.timestamp
+                resetTimes.removeAll()
                 record("Miner started", notable: true)
 
             case .startRequested:
                 lastStartAt = event.timestamp
 
             case .trainingState(.resetting), .resettingState:
-                // Self-recovery after being kicked. Counts as activity, not as a failure.
-                noteProgress(at: event.timestamp)
-                record("Miner reset its state (normal self-recovery)", notable: false)
+                // Self-recovery after being kicked. Normal once; a loop of them is a failure,
+                // so they are counted rather than treated as progress.
+                resetTimes.append(event.timestamp)
+                resetTimes.removeAll { event.timestamp.timeIntervalSince($0) > config.resetLoopWindow }
+                record("Miner reset its state", notable: false)
 
             case .trainingState:
                 break
@@ -399,6 +424,23 @@ final class WatchdogEngine: ObservableObject {
             }
         }
 
+        // --- A reset/re-register loop. ---
+        //
+        // Checked before the sync excuse: a miner cycling through reset and registration is
+        // broken regardless of what the sync schedule says, and it produces no activations at
+        // all while it spins.
+        let resets = recentResetCount
+        if resets >= config.resetLoopThreshold {
+            if outageActive {
+                state = .networkOutage
+                return .doNothing
+            }
+            state = .notProgressing
+            return propose(.resetLoop(count: resets,
+                                      minutes: Int(config.resetLoopWindow / 60)),
+                           at: currentTime)
+        }
+
         // --- Waiting for the run's next full synchronisation. ---
         //
         // A miner that registered mid-epoch is idle by design until the next sync. Restarting
@@ -428,6 +470,7 @@ final class WatchdogEngine: ObservableObject {
         // Healthy.
         pendingTrigger = nil
         suppressedTrigger = nil
+        resetTimes.removeAll()
         state = lastPhase == .training ? .training : .otherPhase(lastPhase)
         return .doNothing
     }
@@ -444,7 +487,16 @@ final class WatchdogEngine: ObservableObject {
         guard let joined = joinedRunAt, let lastSync = lastSyncAt else { return false }
         guard joined > lastSync else { return false }
         guard let next = nextSyncAt else { return false }
+        // Bounded on purpose. The estimate slides forward on every poll, so "wait until the
+        // next estimate" is a wait that never ends. Once the miner has been queued for longer
+        // than the cap, the sync is not coming and the ordinary rules apply again.
+        guard now().timeIntervalSince(joined) < config.syncWaitCap else { return false }
         return now() < next.addingTimeInterval(syncGrace)
+    }
+
+    /// Resets seen inside the loop window.
+    var recentResetCount: Int {
+        resetTimes.filter { now().timeIntervalSince($0) <= config.resetLoopWindow }.count
     }
 
     /// When this miner joined the current epoch.
