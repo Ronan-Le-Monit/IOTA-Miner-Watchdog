@@ -159,7 +159,10 @@ final class WatchdogCoordinator: ObservableObject {
             engine.ingestAPI(activationCount: observation.activationCount,
                              reachable: observation.reachable,
                              lastSyncAt: observation.lastSyncAt,
-                             nextSyncAt: observation.nextSyncAt)
+                             nextSyncAt: observation.nextSyncAt,
+                             runStalledForHours: observation.runAppearsStalled
+                                ? (observation.runSyncAge ?? 0) / 3600
+                                : nil)
         }
 
         // 4. Wake information.

@@ -86,6 +86,9 @@ enum WatchdogState: Equatable {
     case notProgressing
     /// The orchestrator or the network is unreachable; a restart would not help.
     case networkOutage
+    /// The whole training run has stopped syncing, not just this miner. Restarting is futile:
+    /// the orchestrator puts the miner straight back into the same run.
+    case runStalled(hours: Double)
     /// Restart budget exhausted; needs a human.
     case needsAttention(reason: String)
     /// Watchdog paused by the user.
@@ -100,6 +103,9 @@ enum WatchdogState: Equatable {
         case .training, .otherPhase, .settling, .waitingForSync, .stoppedByUser,
              .networkOutage, .paused, .unknown:
             return false
+        case .runStalled:
+            // Worth the user's attention, but not something this app can fix.
+            return true
         }
     }
 }
@@ -203,6 +209,8 @@ final class WatchdogEngine: ObservableObject {
     /// The run's synchronisation schedule, from the public API.
     private(set) var lastSyncAt: Date?
     private(set) var nextSyncAt: Date?
+    /// Set when the miner's whole run has fallen far behind the others.
+    private(set) var runStalledForHours: Double?
     /// When the miner last registered into a run.
     private(set) var lastRegisteredAt: Date?
 
@@ -331,8 +339,10 @@ final class WatchdogEngine: ObservableObject {
 
     /// Records the latest API observation for the local miner.
     func ingestAPI(activationCount: Int?, reachable: Bool,
-                   lastSyncAt: Date? = nil, nextSyncAt: Date? = nil) {
+                   lastSyncAt: Date? = nil, nextSyncAt: Date? = nil,
+                   runStalledForHours: Double? = nil) {
         apiReachable = reachable
+        self.runStalledForHours = runStalledForHours
         if let lastSyncAt { self.lastSyncAt = lastSyncAt }
         if let nextSyncAt { self.nextSyncAt = nextSyncAt }
         guard let activationCount else { return }
@@ -417,6 +427,17 @@ final class WatchdogEngine: ObservableObject {
 
         // --- Network outage guard: applies to the freeze and no-progress rules only. ---
         let outageActive = outageEventTimes.count >= config.outageEventThreshold || !apiReachable
+
+        // --- The whole run is dead, not this miner. ---
+        //
+        // Checked before every restart rule, because none of them can help. The orchestrator
+        // reassigns a restarted miner to the same run, so restarting only costs re-registration
+        // time, repeatedly. Observed 2026-09-06: a run 63.9 hours behind while nine others had
+        // synced within the hour. The fix is a different run, which is not ours to arrange.
+        if let stalledHours = runStalledForHours {
+            state = .runStalled(hours: stalledHours)
+            return suppressedRestartForStalledRun(at: currentTime)
+        }
 
         // --- Rule 3: alive but writing nothing. ---
         if let lastLogEventAt {
@@ -593,6 +614,13 @@ final class WatchdogEngine: ObservableObject {
         pendingTrigger = trigger
         record("Proposing restart: \(trigger.title)", notable: true)
         return .proposeRestart(trigger)
+    }
+
+    /// Says once, rather than every poll, that the run itself is the problem.
+    private func suppressedRestartForStalledRun(at date: Date) -> WatchdogDecision {
+        let trigger = RestartTrigger.noProgress(since: date.timeIntervalSince(progressBaseline ?? date))
+        return suppress(trigger, "the whole run has stopped syncing — restarting rejoins the "
+                        + "same run, so it cannot help")
     }
 
     /// Reports a blocked restart once per trigger, so the log explains the inaction.

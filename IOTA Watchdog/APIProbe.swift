@@ -25,6 +25,22 @@ struct APIObservation: Equatable {
     var lastSyncAt: Date?
     /// When the run expects its next full synchronisation.
     var nextSyncAt: Date?
+    /// How long ago the miner's run last synced.
+    var runSyncAge: TimeInterval?
+    /// The median sync age across all active runs, for comparison.
+    var medianSyncAge: TimeInterval?
+
+    /// True when this run has fallen far behind every other run, i.e. the run itself is dead
+    /// rather than the miner. Restarting cannot help: the orchestrator puts the miner straight
+    /// back into the same run.
+    ///
+    /// Measured 2026-09-06: a stalled run had last synced 63.9 hours earlier while the nine
+    /// healthy runs had all synced within the last hour, median 0.5 h. The separation is not
+    /// subtle, so the test is deliberately blunt.
+    var runAppearsStalled: Bool {
+        guard let age = runSyncAge, let median = medianSyncAge else { return false }
+        return age > max(6 * 3600, median * 6)
+    }
 }
 
 /// Looks up one miner by hotkey prefix across every active run.
@@ -66,14 +82,26 @@ struct APIProbe {
             return APIObservation(reachable: true)
         }
 
-        // The run's synchronisation schedule. A miner that registers mid-epoch cannot train
-        // until the next full sync, so this is what tells us "idle but legitimately waiting".
+        // The synchronisation schedule of every run, not just ours. One run's sync age means
+        // little on its own; against the others it says whether the run is alive at all.
         var lastSyncAt: Date?
         var nextSyncAt: Date?
-        if let sync = try? await client.fetchSync(runID: miner.runId) {
-            lastSyncAt = sync.lastSyncTimestamp.map { Date(timeIntervalSince1970: TimeInterval($0)) }
-            nextSyncAt = sync.nextEstimate.map { Date(timeIntervalSince1970: TimeInterval($0)) }
+        var syncAges: [TimeInterval] = []
+        let referenceDate = Date()
+        for runID in runIDs {
+            guard let sync = try? await client.fetchSync(runID: runID),
+                  let last = sync.lastSyncTimestamp else { continue }
+            let lastDate = Date(timeIntervalSince1970: TimeInterval(last))
+            syncAges.append(referenceDate.timeIntervalSince(lastDate))
+            if runID == miner.runId {
+                lastSyncAt = lastDate
+                nextSyncAt = sync.nextEstimate.map { Date(timeIntervalSince1970: TimeInterval($0)) }
+            }
         }
+        let median: TimeInterval? = syncAges.isEmpty
+            ? nil
+            : syncAges.sorted()[syncAges.count / 2]
+        let ownAge = lastSyncAt.map { referenceDate.timeIntervalSince($0) }
 
         return APIObservation(
             reachable: true,
@@ -84,7 +112,9 @@ struct APIProbe {
             totalInRun: result.total,
             layer: miner.layer + 1,       // the API's layer is zero-based
             lastSyncAt: lastSyncAt,
-            nextSyncAt: nextSyncAt
+            nextSyncAt: nextSyncAt,
+            runSyncAge: ownAge,
+            medianSyncAge: median
         )
     }
 }

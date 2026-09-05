@@ -50,6 +50,11 @@ cannot start is not thrashed.
   mid-epoch cannot train until the run's next full synchronisation, which is one to two hours
   away. Restarting there makes it worse: it re-registers and misses that sync too. The app reads
   the run's sync schedule and shows `Waiting for network sync (~HH:MM)` instead.
+- **It does not restart when the whole run has stalled.** A run can stop syncing while your
+  miner is perfectly healthy. Restarting cannot help, because the orchestrator puts you straight
+  back into the same run. Measured on 6 September: one run had last synced 63.9 hours earlier
+  while the other nine had all synced within the hour. The app compares your run's sync age
+  against every other run and reports `Run has stalled` instead of restarting.
 - **It does not restart during a network outage.** If the orchestrator is unreachable a restart
   cannot help, so it holds.
 - **It does not undo a stop you made yourself.** If you press Stop Training, it stays stopped.
