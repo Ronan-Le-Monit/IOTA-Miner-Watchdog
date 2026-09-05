@@ -2,3 +2,5 @@ default.profraw
 *.profraw
 .DS_Store
 build/
+xcuserdata/
+*.xcuserdatad/

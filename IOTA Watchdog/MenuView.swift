@@ -202,11 +202,25 @@ struct MenuView: View {
     // MARK: Footer
 
     private var footer: some View {
-        HStack {
-            Button("Miner logs") { coordinator.openMinerLogFolder() }
-            Button("Watchdog log") { coordinator.openLogFolder() }
-            Spacer()
-            Button("Quit") { NSApplication.shared.terminate(nil) }
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Button("Miner logs") { coordinator.openMinerLogFolder() }
+                Button("Watchdog log") { coordinator.openLogFolder() }
+                Spacer()
+                Button("Quit") { NSApplication.shared.terminate(nil) }
+            }
+            // Hidden until a link is configured, so a release never ships a dead button.
+            if AppLinks.donation != nil || AppLinks.repository != nil {
+                HStack(spacing: 10) {
+                    if let donation = AppLinks.donation {
+                        Button("Support this project") { NSWorkspace.shared.open(donation) }
+                    }
+                    if let repository = AppLinks.repository {
+                        Button("Report an issue") { NSWorkspace.shared.open(repository) }
+                    }
+                    Spacer()
+                }
+            }
         }
         .font(.caption)
     }
