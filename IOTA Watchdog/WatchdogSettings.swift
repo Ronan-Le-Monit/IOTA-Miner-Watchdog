@@ -25,7 +25,7 @@ final class WatchdogSettings: ObservableObject {
     private struct Stored: Codable {
         var autoRestartEnabled: Bool?
         var keepAwakeEnabled: Bool?
-        var localPrefix: String?
+        var localPrefixOverride: String?
         var noProgressMinutes: Int?
         var frozenMinutes: Int?
         var countdownSeconds: Int?
@@ -34,7 +34,10 @@ final class WatchdogSettings: ObservableObject {
 
     @Published var autoRestartEnabled: Bool { didSet { save() } }
     @Published var keepAwakeEnabled: Bool { didSet { save() } }
-    @Published var localPrefix: String { didSet { save() } }
+    /// Empty means "work it out from this Mac". Set only when the user types one in.
+    @Published var localPrefixOverride: String { didSet { save() } }
+    /// The hotkey found on this machine, re-read at launch so it is never stale.
+    @Published private(set) var detectedHotkey: MinerIdentity.Hotkey?
     @Published var noProgressMinutes: Int { didSet { save() } }
     @Published var frozenMinutes: Int { didSet { save() } }
     @Published var countdownSeconds: Int { didSet { save() } }
@@ -61,7 +64,8 @@ final class WatchdogSettings: ObservableObject {
         // another app, so that should be a deliberate choice.
         autoRestartEnabled = stored.autoRestartEnabled ?? false
         keepAwakeEnabled = stored.keepAwakeEnabled ?? true
-        localPrefix = stored.localPrefix ?? "5DXDN2UR"
+        localPrefixOverride = stored.localPrefixOverride ?? ""
+        detectedHotkey = MinerIdentity.detect()
         noProgressMinutes = stored.noProgressMinutes ?? 60
         frozenMinutes = stored.frozenMinutes ?? 5
         countdownSeconds = stored.countdownSeconds ?? 60
@@ -83,14 +87,14 @@ final class WatchdogSettings: ObservableObject {
         }
         if let value = bool("autoRestartEnabled") { autoRestartEnabled = value }
         if let value = bool("keepAwakeEnabled") { keepAwakeEnabled = value }
-        if let value = arguments["localPrefix"] as? String { localPrefix = value }
+        if let value = arguments["localPrefix"] as? String { localPrefixOverride = value }
     }
 
     private func save() {
         guard !isLoading else { return }
         let stored = Stored(autoRestartEnabled: autoRestartEnabled,
                             keepAwakeEnabled: keepAwakeEnabled,
-                            localPrefix: localPrefix,
+                            localPrefixOverride: localPrefixOverride,
                             noProgressMinutes: noProgressMinutes,
                             frozenMinutes: frozenMinutes,
                             countdownSeconds: countdownSeconds,
@@ -105,6 +109,20 @@ final class WatchdogSettings: ObservableObject {
 
     /// Where the settings file lives, for diagnostics.
     var storageURL: URL { fileURL }
+
+    /// The miner to watch: the user's override if they set one, otherwise whatever this Mac has.
+    /// Nil means we could not identify a miner, which must be reported rather than guessed — an
+    /// empty prefix would match the first miner in the API and show a stranger's numbers.
+    var localPrefix: String? {
+        let trimmed = localPrefixOverride.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty { return trimmed }
+        return detectedHotkey?.prefix
+    }
+
+    /// Re-runs detection, e.g. after the user installs a wallet.
+    func refreshDetectedHotkey() {
+        detectedHotkey = MinerIdentity.detect()
+    }
 
     /// The engine configuration implied by these settings.
     var engineConfig: WatchdogConfig {

@@ -106,7 +106,7 @@ final class WatchdogCoordinator: ObservableObject {
         logger.log("Watchdog started"
             + " — auto-restart \(settings.autoRestartEnabled ? "on" : "off")"
             + ", keep-awake \(settings.keepAwakeEnabled ? "on" : "off")"
-            + ", prefix \(settings.localPrefix)"
+            + ", miner \(settings.localPrefix ?? "NOT IDENTIFIED")"
             + ", frozen after \(settings.frozenMinutes)m"
             + ", no-progress after \(settings.noProgressMinutes)m"
             + ", prefs domain \(UserDefaults.standard.persistentDomain(forName: Bundle.main.bundleIdentifier ?? "?")?.count ?? -1) keys"
@@ -145,9 +145,12 @@ final class WatchdogCoordinator: ObservableObject {
 
         // 3. The API, occasionally.
         let now = Date()
-        if lastAPICheck == nil || now.timeIntervalSince(lastAPICheck!) >= apiInterval {
+        // Only ask the API about a miner we can actually name. An empty prefix matches the
+        // first miner in the list, which would quietly report a stranger's numbers.
+        if let prefix = settings.localPrefix,
+           lastAPICheck == nil || now.timeIntervalSince(lastAPICheck!) >= apiInterval {
             lastAPICheck = now
-            let observation = await apiProbe.observe(prefix: settings.localPrefix)
+            let observation = await apiProbe.observe(prefix: prefix)
             lastAPI = observation
             engine.ingestAPI(activationCount: observation.activationCount,
                              reachable: observation.reachable,

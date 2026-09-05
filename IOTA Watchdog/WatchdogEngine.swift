@@ -41,8 +41,8 @@ struct WatchdogConfig: Equatable {
     /// Orchestrator-unreachable events within this window that mean "the network is down".
     var outageWindow: TimeInterval = 10 * 60
     var outageEventThreshold = 3
-    /// Hotkey prefix of the miner on this Mac.
-    var localPrefix = "5DXDN2UR"
+    /// Hotkey prefix of the miner on this Mac. Nil when it could not be identified.
+    var localPrefix: String?
     /// Master switch for automatic restarts.
     var autoRestartEnabled = true
 }

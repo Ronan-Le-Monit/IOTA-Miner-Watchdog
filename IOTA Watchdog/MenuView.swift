@@ -87,6 +87,15 @@ struct MenuView: View {
 
     private var evidence: some View {
         VStack(alignment: .leading, spacing: 5) {
+            if let prefix = settings.localPrefix {
+                row("Watching miner", prefix + (settings.localPrefixOverride.isEmpty ? "" : " (manual)"))
+            } else {
+                Text("No miner found on this Mac. Set the hotkey below, "
+                     + "or start IOTA Train at Home once so its wallet exists.")
+                    .font(.caption)
+                    .foregroundStyle(Theme.inactiveRed)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             row("Miner process", coordinator.workerText)
             row("Log age", formatAge(coordinator.logAge))
             row("Last activation", formatAge(engine.lastProgressAt.map { Date().timeIntervalSince($0) }))
@@ -141,6 +150,20 @@ struct MenuView: View {
                 }
             if let launchError {
                 Text(launchError).font(.caption).foregroundStyle(Theme.inactiveRed)
+            }
+
+            HStack(spacing: 6) {
+                Text("Hotkey")
+                    .font(.caption)
+                    .foregroundStyle(Theme.mutedText)
+                TextField(settings.detectedHotkey?.prefix ?? "e.g. 5DXDN2UR",
+                          text: $settings.localPrefixOverride)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(.caption, design: .monospaced))
+                if !settings.localPrefixOverride.isEmpty {
+                    Button("Auto") { settings.localPrefixOverride = "" }
+                        .font(.caption)
+                }
             }
 
             HStack {
