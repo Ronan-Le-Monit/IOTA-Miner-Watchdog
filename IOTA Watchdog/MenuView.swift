@@ -213,7 +213,6 @@ struct MenuView: View {
                 Button("Miner logs") { coordinator.openMinerLogFolder() }
                 Button("Watchdog log") { coordinator.openLogFolder() }
                 Spacer()
-                Button("Quit") { NSApplication.shared.terminate(nil) }
             }
             .font(.caption)
 
@@ -232,14 +231,17 @@ struct MenuView: View {
                 .padding(.vertical, 14)
             }
 
-            if let repository = AppLinks.repository {
-                HStack {
-                    Spacer()
-                    // Full size and fixed, so the label is never clipped. The footer used to
-                    // force .caption on everything, which truncated it.
+            // Bottom row: the issue link on the left, Quit on the right. Both full size and
+            // fixed, so neither label is clipped; the footer used to force .caption on
+            // everything, which truncated them.
+            HStack {
+                if let repository = AppLinks.repository {
                     Button("Report an issue") { NSWorkspace.shared.open(repository) }
                         .fixedSize()
                 }
+                Spacer()
+                Button("Quit") { NSApplication.shared.terminate(nil) }
+                    .fixedSize()
             }
         }
     }
