@@ -32,6 +32,10 @@ struct MenuView: View {
         }
         .padding(14)
         .frame(width: 330)
+        // Painted behind the padding, not inside it. Without this the view inherits the menu
+        // bar popover's translucent material and the header text is unreadable over bright
+        // windows behind it.
+        .background(Theme.background)
         .onAppear { launchAtLogin = settings.launchAtLogin }
     }
 
@@ -202,31 +206,42 @@ struct MenuView: View {
     // MARK: Footer
 
     private var footer: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        // Spacing is 0 here so each section sets its own; a uniform stack spacing made the
+        // Support row look like just another line of buttons.
+        VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Button("Miner logs") { coordinator.openMinerLogFolder() }
                 Button("Watchdog log") { coordinator.openLogFolder() }
                 Spacer()
                 Button("Quit") { NSApplication.shared.terminate(nil) }
             }
+            .font(.caption)
+
             // Hidden when nothing is configured, so a release never ships a dead button.
-            if !AppLinks.donations.isEmpty || AppLinks.repository != nil {
+            if !AppLinks.donations.isEmpty {
                 HStack(spacing: 8) {
-                    if !AppLinks.donations.isEmpty {
-                        Text("Support")
-                            .foregroundStyle(Theme.mutedText)
-                        ForEach(AppLinks.donations) { link in
-                            Button(link.label) { NSWorkspace.shared.open(link.url) }
-                        }
+                    Text("Support")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(Theme.activeGreen)
+                    ForEach(AppLinks.donations) { link in
+                        Button(link.label) { NSWorkspace.shared.open(link.url) }
+                            .font(.caption)
                     }
                     Spacer()
-                    if let repository = AppLinks.repository {
-                        Button("Report an issue") { NSWorkspace.shared.open(repository) }
-                    }
+                }
+                .padding(.vertical, 14)
+            }
+
+            if let repository = AppLinks.repository {
+                HStack {
+                    Spacer()
+                    // Full size and fixed, so the label is never clipped. The footer used to
+                    // force .caption on everything, which truncated it.
+                    Button("Report an issue") { NSWorkspace.shared.open(repository) }
+                        .fixedSize()
                 }
             }
         }
-        .font(.caption)
     }
 }
 
