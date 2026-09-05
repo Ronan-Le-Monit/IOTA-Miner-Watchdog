@@ -2,22 +2,30 @@
 //  AppLinks.swift
 //  IOTA Watchdog
 //
-//  Outward-facing links. Kept in one place so releasing the app is a one-line change.
+//  Outward-facing links, kept in one place.
 //
 
 import Foundation
 
 enum AppLinks {
 
-    /// Where "Support this project" points. Set this to your donation page before releasing;
-    /// while it is nil the menu item is hidden rather than showing a dead link.
-    ///
-    /// Examples:
-    ///   URL(string: "https://github.com/sponsors/<you>")
-    ///   URL(string: "https://ko-fi.com/<you>")
-    ///   URL(string: "https://buymeacoffee.com/<you>")
-    static let donation: URL? = nil
+    struct DonationLink: Identifiable {
+        let label: String
+        let url: URL
+        var id: String { url.absoluteString }
+    }
 
-    /// Project home, used by "Report an issue" when set.
+    /// Ways to say thanks. Shown in the menu; an empty list hides that row entirely.
+    ///
+    /// Built with `compactMap` rather than force-unwrapping, so a typo in a literal drops the
+    /// one bad link instead of crashing the app on launch.
+    static let donations: [DonationLink] = [
+        ("Ko-fi", "https://ko-fi.com/monit"),
+        ("Buy Me a Coffee", "https://buymeacoffee.com/le_monit")
+    ].compactMap { label, string in
+        URL(string: string).map { DonationLink(label: label, url: $0) }
+    }
+
+    /// Project home, used by "Report an issue".
     static let repository = URL(string: "https://github.com/Ronan-Le-Monit/IOTA-Miner-Watchdog")
 }

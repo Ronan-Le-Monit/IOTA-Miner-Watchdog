@@ -133,8 +133,12 @@ which stops a test run from restarting your real miner.
 ## Support this project
 
 This app is free and always will be. If it saves you some mining time and you would like to say
-thanks, use the Sponsor button on this page. A matching link appears in the app's own menu once
-it is configured.
+thanks:
+
+- [Ko-fi](https://ko-fi.com/monit)
+- [Buy Me a Coffee](https://buymeacoffee.com/le_monit)
+
+Both links are also in the app's own menu, at the bottom.
 
 ## Licence
 

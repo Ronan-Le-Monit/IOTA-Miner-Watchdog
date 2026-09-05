@@ -209,16 +209,20 @@ struct MenuView: View {
                 Spacer()
                 Button("Quit") { NSApplication.shared.terminate(nil) }
             }
-            // Hidden until a link is configured, so a release never ships a dead button.
-            if AppLinks.donation != nil || AppLinks.repository != nil {
-                HStack(spacing: 10) {
-                    if let donation = AppLinks.donation {
-                        Button("Support this project") { NSWorkspace.shared.open(donation) }
+            // Hidden when nothing is configured, so a release never ships a dead button.
+            if !AppLinks.donations.isEmpty || AppLinks.repository != nil {
+                HStack(spacing: 8) {
+                    if !AppLinks.donations.isEmpty {
+                        Text("Support")
+                            .foregroundStyle(Theme.mutedText)
+                        ForEach(AppLinks.donations) { link in
+                            Button(link.label) { NSWorkspace.shared.open(link.url) }
+                        }
                     }
+                    Spacer()
                     if let repository = AppLinks.repository {
                         Button("Report an issue") { NSWorkspace.shared.open(repository) }
                     }
-                    Spacer()
                 }
             }
         }
