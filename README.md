@@ -3,8 +3,8 @@
 A small macOS menu-bar app that notices when your **IOTA Train at Home** miner stops, crashes,
 freezes or quietly stops making progress, and restarts it for you.
 
-Free and open source. If it saves you some mining time, there is a donation link in the app's
-menu and at the bottom of this page.
+Free and open source. If it saves you some mining time, there is a way to say thanks at the
+bottom of this page.
 
 > Not affiliated with, endorsed by, or supported by Macrocosmos. It works alongside their
 > IOTA Train at Home app by reading the log files that app already writes.
@@ -132,7 +132,9 @@ which stops a test run from restarting your real miner.
 
 ## Support this project
 
-If it is useful to you, a small donation is appreciated. There is a link in the app's menu.
+This app is free and always will be. If it saves you some mining time and you would like to say
+thanks, use the Sponsor button on this page. A matching link appears in the app's own menu once
+it is configured.
 
 ## Licence
 

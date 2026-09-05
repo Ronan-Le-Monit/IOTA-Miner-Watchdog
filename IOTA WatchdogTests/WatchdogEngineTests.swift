@@ -133,14 +133,14 @@ final class WatchdogEngineTests: XCTestCase {
         engine.ingest([event(.processSpawned)])
         engine.ingest(running())
         clock.advance(60)                            // still well inside the startup grace
-        engine.ingest([event(.criticalError(reason: "pseudo gradients for miner 5DXDN2UR has NaNs")),
+        engine.ingest([event(.criticalError(reason: "pseudo gradients for miner 5TESTAAA has NaNs")),
                        event(.shutdownComplete)])
         engine.ingest(workerGone())
 
         guard case .proposeRestart(let trigger) = engine.evaluate() else {
             return XCTFail("expected a restart proposal")
         }
-        XCTAssertEqual(trigger, .fatalError(reason: "pseudo gradients for miner 5DXDN2UR has NaNs"))
+        XCTAssertEqual(trigger, .fatalError(reason: "pseudo gradients for miner 5TESTAAA has NaNs"))
         XCTAssertEqual(engine.state, .stopped)
     }
 
@@ -149,7 +149,7 @@ final class WatchdogEngineTests: XCTestCase {
     func testRealCrashSequenceProposesRestartWithoutWaitingForDebounce() {
         settleIntoTraining()
         engine.ingest([
-            event(.criticalError(reason: "pseudo gradients for miner 5DXDN2UR has NaNs")),
+            event(.criticalError(reason: "pseudo gradients for miner 5TESTAAA has NaNs")),
             event(.shutdownComplete, at: 19),
             event(.processExited(code: "0", signal: "null"), at: 20)
         ])

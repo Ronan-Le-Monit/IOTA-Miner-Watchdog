@@ -2,8 +2,9 @@
 //  LogParserTests.swift
 //  IOTA WatchdogTests
 //
-//  Every fixture below is a verbatim line taken from
-//  ~/Library/Logs/IOTA Train at Home/ (2026-09-02 … 2026-09-04).
+//  Every fixture below is a real line captured from
+//  ~/Library/Logs/IOTA Train at Home/ (2026-09-02 … 2026-09-04), with the hotkeys replaced by
+//  obviously fake ones (5TESTAAA…, 5PEERAAA…). Everything else is exactly as the miner wrote it.
 //
 
 import XCTest
@@ -38,7 +39,7 @@ final class LogParserTests: XCTestCase {
             "                                                       'miner_status': 'training',",
             "Traceback (most recent call last):",
             "  File \"main_pool.py\", line 1, in main",
-            "common.utils.exceptions.NanInfException: Loss for miner 5DXDN2UR has NaNs",
+            "common.utils.exceptions.NanInfException: Loss for miner 5TESTAAA has NaNs",
             "    'control.stop',",
             "  serverCapabilities: [",
             "not a log line at all"
@@ -84,7 +85,7 @@ final class LogParserTests: XCTestCase {
 
     func testChatterProvesLiveness() throws {
         let lines = [
-            "[2026-09-04 15:10:04.112] [info]  2026-09-04 15:10:04.112 | DEBUG    | miner.p2p.stack:on_peer_status:289 - P2P /peer/status from 5CZdRcsL... (peer=ac109d4a692821c5...)",
+            "[2026-09-04 15:10:04.112] [info]  2026-09-04 15:10:04.112 | DEBUG    | miner.p2p.stack:on_peer_status:289 - P2P /peer/status from 5PEERAAA... (peer=ac109d4a692821c5...)",
             "[2026-09-04 15:10:10.144] [info]  2026-09-04 15:10:10.144 | DEBUG    | miner.new_miner:_peer_status_broadcast_loop:662 - Peer status dict has 71 entries"
         ]
         for line in lines {
@@ -102,9 +103,9 @@ final class LogParserTests: XCTestCase {
     }
 
     func testRegisteredExtractsPrefix() throws {
-        let line = "[2026-09-04 14:53:25.291] [info]  2026-09-04 14:53:25.291 | SUCCESS  | miner.new_miner:_apply_registration_response:1320 - ✅ Miner 5DXDN2UR registered successfully in layer 1 on training epoch 47"
+        let line = "[2026-09-04 14:53:25.291] [info]  2026-09-04 14:53:25.291 | SUCCESS  | miner.new_miner:_apply_registration_response:1320 - ✅ Miner 5TESTAAA registered successfully in layer 1 on training epoch 47"
         let event = try XCTUnwrap(parser.parse(line))
-        XCTAssertEqual(event.kind, .registered(prefix: "5DXDN2UR"))
+        XCTAssertEqual(event.kind, .registered(prefix: "5TESTAAA"))
     }
 
     func testTrainingStates() throws {
@@ -142,9 +143,9 @@ final class LogParserTests: XCTestCase {
     }
 
     func testCriticalErrorCarriesReason() throws {
-        let line = "[2026-09-04 11:09:56.105] [info]  2026-09-04 11:09:56.105 | ERROR    | miner.new_miner:run_miner:1883 - ❌ Critical error in run_miner: pseudo gradients for miner 5DXDN2UR has NaNs"
+        let line = "[2026-09-04 11:09:56.105] [info]  2026-09-04 11:09:56.105 | ERROR    | miner.new_miner:run_miner:1883 - ❌ Critical error in run_miner: pseudo gradients for miner 5TESTAAA has NaNs"
         let event = try XCTUnwrap(parser.parse(line))
-        XCTAssertEqual(event.kind, .criticalError(reason: "pseudo gradients for miner 5DXDN2UR has NaNs"))
+        XCTAssertEqual(event.kind, .criticalError(reason: "pseudo gradients for miner 5TESTAAA has NaNs"))
     }
 
     func testProtocolReconnectFailed() throws {
@@ -199,18 +200,18 @@ final class LogParserTests: XCTestCase {
 
     func testBenignNoiseProducesNoEvent() {
         let noise = [
-            "[2026-09-04 10:30:00.000] [info]  2026-09-04 10:30:00.000 | ERROR    | subnet.utils.vector_utils:check_for_nans_and_infs:137 - ❌ Miner has NaNs in Loss for miner 5DXDN2UR | 1 / 1 = 100.00%",
+            "[2026-09-04 10:30:00.000] [info]  2026-09-04 10:30:00.000 | ERROR    | subnet.utils.vector_utils:check_for_nans_and_infs:137 - ❌ Miner has NaNs in Loss for miner 5TESTAAA | 1 / 1 = 100.00%",
             "[2026-09-04 10:30:01.000] [info]  2026-09-04 10:30:01.000 | ERROR    | subnet.common_api_client:orchestrator_request:109 - Failed request after 3 attempts: 400, {\"detail\":{\"error\":\"Request is too stale\",\"message\":\"EpistulaError: Request is too stale\",\"name\":\"EpistulaError\"}}",
             "[2026-09-04 10:30:02.000] [info]  2026-09-04 10:30:02.000 | ERROR    | subnet.common_api_client:orchestrator_request:97 - Error making orchestrator request to endpoint /miner/submit_activation: 400 - {\"detail\":\"attestation_required\"}",
-            "[2026-09-04 15:10:10.142] [info]  2026-09-04 15:10:10.142 | WARNING  | miner.new_miner:_broadcast_peer_status:568 - Broadcast peer status: 28/37 ok, 9 unreachable in 5004ms | errors: TimeoutError=9 | sample: [5DVCvuhN (relay=y, direct=4) -> TimeoutError: ]",
+            "[2026-09-04 15:10:10.142] [info]  2026-09-04 15:10:10.142 | WARNING  | miner.new_miner:_broadcast_peer_status:568 - Broadcast peer status: 28/37 ok, 9 unreachable in 5004ms | errors: TimeoutError=9 | sample: [5PEERBBB (relay=y, direct=4) -> TimeoutError: ]",
             "[2026-09-04 10:30:04.000] [info]  2026-09-04 10:30:04.000 | WARNING  | subnet.model.utils:log_gpu_memory_usage:41 - High GPU memory usage detected: 71GB -- after forward pass",
             "[2026-09-04 12:37:22.256] [info]  2026-09-04 12:37:22.256 | WARNING  | miner.utils.node_control_mixin:register_set_queue_state:221 - register_set_queue_state exhausted retries (3): POST /register/queue_state failed 503",
             "[2026-09-04 10:30:06.000] [info]  PNP retry 2/5: RuntimeError: connect timeout after 10s — backoff 1.5s",
-            "[2026-09-04 10:30:07.000] [info]  2026-09-04 10:30:07.000 | WARNING  | miner.sync_v2.synced_collection:set_many:96 - set_many 'run-4_12_10_5-tah/node_registry/5DXDN2UR/last_keepalive': CASVersionMismatch",
+            "[2026-09-04 10:30:07.000] [info]  2026-09-04 10:30:07.000 | WARNING  | miner.sync_v2.synced_collection:set_many:96 - set_many 'run-4_12_10_5-tah/node_registry/5TESTAAA/last_keepalive': CASVersionMismatch",
             "[2026-09-04 14:48:07.292] [info]  2026-09-04 14:48:07.292 | WARNING  | miner.training.activation_queue:stop_activation_fetcher:201 - Activation fetcher task returned an exception: Miner not registered",
             "[2026-09-04 10:30:09.000] [info]  2026-09-04 10:30:09.000 | ERROR    | subnet.miner_api_client:submit_activation_request:383 - Error submitting activation: Miner is moving state from training to weights_uploading",
             "[2026-09-04 10:30:10.000] [info]  2026-09-04 10:30:10.000 | WARNING  | miner.utils.partition_merging:get_weight_partition_info:88 - No partitions found for layer 1",
-            "[2026-09-04 10:30:11.000] [info]  2026-09-04 10:30:11.000 | INFO     | miner.new_miner:submit_weights:1701 - Pseudo gradients for miner 5DXDN2UR have mean nan and std nan"
+            "[2026-09-04 10:30:11.000] [info]  2026-09-04 10:30:11.000 | INFO     | miner.new_miner:submit_weights:1701 - Pseudo gradients for miner 5TESTAAA have mean nan and std nan"
         ]
         for line in noise {
             XCTAssertNil(parser.parse(line), "should be ignored: \(line.prefix(120))")
@@ -220,7 +221,7 @@ final class LogParserTests: XCTestCase {
     /// "Skipping backward … due to loss/target fetch error" is an ERROR line but the miner
     /// carries on with the next activation.
     func testSkippedBackwardIsNotFatal() {
-        let line = "[2026-09-04 10:30:12.000] [info]  2026-09-04 10:30:12.000 | ERROR    | miner.training.training:_run_backward_slices:513 - Skipping backward for activation e06bb534-22a5-424f-9aa2-54e9910d4302 due to loss/target fetch error: Loss for miner 5DXDN2UR has NaNs"
+        let line = "[2026-09-04 10:30:12.000] [info]  2026-09-04 10:30:12.000 | ERROR    | miner.training.training:_run_backward_slices:513 - Skipping backward for activation e06bb534-22a5-424f-9aa2-54e9910d4302 due to loss/target fetch error: Loss for miner 5TESTAAA has NaNs"
         XCTAssertNil(parser.parse(line))
     }
 }

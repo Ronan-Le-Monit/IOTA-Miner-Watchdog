@@ -3,7 +3,7 @@
 //  IOTA WatchdogTests
 //
 //  Phase-change parsing: the single-line Python variant and the multi-line Electron block.
-//  All fixtures are verbatim lines from ~/Library/Logs/IOTA Train at Home/.
+//  Fixtures are real lines from ~/Library/Logs/IOTA Train at Home/, hotkeys anonymised.
 //
 
 import XCTest
@@ -36,7 +36,7 @@ final class LayerPhaseTests: XCTestCase {
 
 final class LogLineStreamTests: XCTestCase {
 
-    /// Verbatim multi-line block from 2026-09-04-cli.old.log line 41123.
+    /// Real multi-line block (hotkeys anonymised) from 2026-09-04-cli.old.log line 41123.
     private let block = [
         "[2026-09-04 16:31:57.889] [info]  [Node Protocol Control] training.state accepted {",
         "  state: 'layer_state_change',",

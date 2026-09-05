@@ -28,8 +28,13 @@ final class WatchdogSettingsTests: XCTestCase {
     func testDefaultsAreSafeOnFirstRun() {
         let settings = WatchdogSettings(fileURL: fileURL)
         XCTAssertFalse(settings.autoRestartEnabled, "must not restart anything until asked")
-        XCTAssertEqual(settings.localPrefix, "5DXDN2UR")
         XCTAssertEqual(settings.noProgressMinutes, 60)
+        XCTAssertEqual(settings.frozenMinutes, 5)
+        XCTAssertTrue(settings.localPrefixOverride.isEmpty, "no manual hotkey until the user sets one")
+        // Deliberately not asserting a particular hotkey: it is detected from whatever wallet
+        // this machine has. An earlier version hardcoded one here and only passed on the
+        // author's Mac.
+        XCTAssertEqual(settings.localPrefix, settings.detectedHotkey?.prefix)
     }
 
     /// The original bug: a toggle in the menu did not survive a relaunch, because a stale sandbox
@@ -202,7 +207,7 @@ final class RestartSuppressionTests: XCTestCase {
         let nextSync = lastSync.addingTimeInterval(125 * 60)
 
         // The miner registers now, i.e. after that sync, then reaches training and goes quiet.
-        engine.ingest([event(.processSpawned), event(.registered(prefix: "5DXDN2UR"))])
+        engine.ingest([event(.processSpawned), event(.registered(prefix: "5TESTAAA"))])
         engine.ingest(running())
         engine.ingestAPI(activationCount: 1196, reachable: true,
                          lastSyncAt: lastSync, nextSyncAt: nextSync)
@@ -240,7 +245,7 @@ final class RestartSuppressionTests: XCTestCase {
         let lastSync = clock.current                       // sync happened after registration
         let nextSync = clock.current.addingTimeInterval(120 * 60)
 
-        engine.ingest([event(.processSpawned), event(.registered(prefix: "5DXDN2UR"))])
+        engine.ingest([event(.processSpawned), event(.registered(prefix: "5TESTAAA"))])
         _ = registered
         engine.ingest(running())
         engine.ingestAPI(activationCount: 500, reachable: true,

@@ -156,7 +156,7 @@ struct MenuView: View {
                 Text("Hotkey")
                     .font(.caption)
                     .foregroundStyle(Theme.mutedText)
-                TextField(settings.detectedHotkey?.prefix ?? "e.g. 5DXDN2UR",
+                TextField(settings.detectedHotkey?.prefix ?? "e.g. 5TESTAAA",
                           text: $settings.localPrefixOverride)
                     .textFieldStyle(.roundedBorder)
                     .font(.system(.caption, design: .monospaced))

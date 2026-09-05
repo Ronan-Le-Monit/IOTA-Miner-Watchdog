@@ -13,7 +13,7 @@ final class APIProbeLiveTests: XCTestCase {
 
     /// The miner running on this Mac.
     func testResolvesLocalMinerAgainstTheLiveAPI() async throws {
-        let observation = await APIProbe().observe(prefix: "5DXDN2UR")
+        let observation = await APIProbe().observe(prefix: "5TESTAAA")
 
         try XCTSkipUnless(observation.reachable, "API not reachable — skipping live check")
 

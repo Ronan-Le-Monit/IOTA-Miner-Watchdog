@@ -40,9 +40,9 @@ final class MinerIdentityTests: XCTestCase {
 
     func testDetectsTheIOTAWalletHotkey() throws {
         try makeHotkey(wallet: "iota", name: "iota_miner",
-                       address: "5DXDN2URTWMjo7FfrGpHG7PbCpDhMpQizNQAkdrcjx1xhYUY")
+                       address: "5TESTAAATestMinerAaaaTestMinerAaaaTestMinerAaaaT")
         let found = try XCTUnwrap(MinerIdentity.detect(in: root))
-        XCTAssertEqual(found.prefix, "5DXDN2UR")
+        XCTAssertEqual(found.prefix, "5TESTAAA")
         XCTAssertEqual(found.wallet, "iota")
         XCTAssertEqual(found.name, "iota_miner")
     }
@@ -50,15 +50,15 @@ final class MinerIdentityTests: XCTestCase {
     /// The point of the whole change: a different Mac reports its own miner.
     func testDetectsADifferentMachinesHotkey() throws {
         try makeHotkey(wallet: "iota", name: "iota_miner",
-                       address: "5FjAQL4YFYQECxGRpSGXu8oxSDNTxoob8tsFVA9JFwQcbZEa")
-        XCTAssertEqual(MinerIdentity.detect(in: root)?.prefix, "5FjAQL4Y")
+                       address: "5TESTBBBTestMinerBbbbTestMinerBbbbTestMinerBbbbT")
+        XCTAssertEqual(MinerIdentity.detect(in: root)?.prefix, "5TESTBBB")
     }
 
     /// A single hotkey under an unexpected wallet name is still unambiguous.
     func testFallsBackToTheOnlyHotkeyPresent() throws {
         try makeHotkey(wallet: "mywallet", name: "somekey",
-                       address: "5GEp2F2ZbRw1abcdefghijklmnopqrstuvwxyz0123456789AB")
-        XCTAssertEqual(MinerIdentity.detect(in: root)?.prefix, "5GEp2F2Z")
+                       address: "5TESTDDDTestMinerDdddTestMinerDdddTestMinerDdddT")
+        XCTAssertEqual(MinerIdentity.detect(in: root)?.prefix, "5TESTDDD")
     }
 
     /// Two unrelated wallets and no expected name: refuse rather than pick one at random.
@@ -76,8 +76,8 @@ final class MinerIdentityTests: XCTestCase {
         try makeHotkey(wallet: "walletA", name: "keyA",
                        address: "5AAAAAAAaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
         try makeHotkey(wallet: "iota", name: "iota_miner",
-                       address: "5DXDN2URTWMjo7FfrGpHG7PbCpDhMpQizNQAkdrcjx1xhYUY")
-        XCTAssertEqual(MinerIdentity.detect(in: root)?.prefix, "5DXDN2UR")
+                       address: "5TESTAAATestMinerAaaaTestMinerAaaaTestMinerAaaaT")
+        XCTAssertEqual(MinerIdentity.detect(in: root)?.prefix, "5TESTAAA")
     }
 
     func testNoWalletsAtAllYieldsNothing() {
@@ -88,7 +88,7 @@ final class MinerIdentityTests: XCTestCase {
     /// The same hotkey is stored twice on disk; it must be reported once.
     func testTheSidecarDoesNotProduceADuplicate() throws {
         try makeHotkey(wallet: "iota", name: "iota_miner",
-                       address: "5DXDN2URTWMjo7FfrGpHG7PbCpDhMpQizNQAkdrcjx1xhYUY")
+                       address: "5TESTAAATestMinerAaaaTestMinerAaaaTestMinerAaaaT")
         XCTAssertEqual(MinerIdentity.availableHotkeys(in: root).count, 1)
     }
 
@@ -96,9 +96,9 @@ final class MinerIdentityTests: XCTestCase {
     func testPrefixFromTheMinersLog() {
         let events = [
             LogEvent(timestamp: Date(), kind: .chatter, rawLine: ""),
-            LogEvent(timestamp: Date(), kind: .registered(prefix: "5DFhoxZE"), rawLine: "")
+            LogEvent(timestamp: Date(), kind: .registered(prefix: "5TESTCCC"), rawLine: "")
         ]
-        XCTAssertEqual(MinerIdentity.prefixFromLog(events), "5DFhoxZE")
+        XCTAssertEqual(MinerIdentity.prefixFromLog(events), "5TESTCCC")
         XCTAssertNil(MinerIdentity.prefixFromLog([]))
     }
 }
@@ -120,9 +120,9 @@ final class WatchedMinerSettingsTests: XCTestCase {
     /// A typed hotkey overrides detection, and clearing it returns to automatic.
     func testOverrideWinsAndCanBeCleared() {
         let settings = WatchdogSettings(fileURL: fileURL)
-        settings.localPrefixOverride = "5FjAQL4Y"
-        XCTAssertEqual(settings.localPrefix, "5FjAQL4Y")
-        XCTAssertEqual(settings.engineConfig.localPrefix, "5FjAQL4Y")
+        settings.localPrefixOverride = "5TESTBBB"
+        XCTAssertEqual(settings.localPrefix, "5TESTBBB")
+        XCTAssertEqual(settings.engineConfig.localPrefix, "5TESTBBB")
 
         settings.localPrefixOverride = ""
         XCTAssertEqual(settings.localPrefix, settings.detectedHotkey?.prefix)
@@ -146,8 +146,8 @@ final class WatchedMinerSettingsTests: XCTestCase {
 
     func testOverrideSurvivesARelaunch() {
         let first = WatchdogSettings(fileURL: fileURL)
-        first.localPrefixOverride = "5DFhoxZE"
+        first.localPrefixOverride = "5TESTCCC"
         let second = WatchdogSettings(fileURL: fileURL)
-        XCTAssertEqual(second.localPrefix, "5DFhoxZE")
+        XCTAssertEqual(second.localPrefix, "5TESTCCC")
     }
 }

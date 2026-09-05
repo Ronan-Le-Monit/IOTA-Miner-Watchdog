@@ -295,7 +295,7 @@ struct LogParser {
         return value.isEmpty ? nil : String(value)
     }
 
-    /// Pulls the miner prefix out of "✅ Miner 5DXDN2UR registered successfully in layer 1 …".
+    /// Pulls the miner prefix out of "✅ Miner 5TESTAAA registered successfully in layer 1 …".
     private static func minerPrefix(in body: String) -> String? {
         guard let range = body.range(of: "Miner ") else { return nil }
         let token = body[range.upperBound...].prefix { !$0.isWhitespace }

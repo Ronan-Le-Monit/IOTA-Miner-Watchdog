@@ -229,8 +229,8 @@ struct TrackedMiner: Identifiable, Codable, Equatable, Hashable {
     }
 
     static let defaults: [TrackedMiner] = [
-        TrackedMiner(label: "Mac Mini (Ronan)", prefix: "5FjAQL4Y"),
-        TrackedMiner(label: "MacBook Pro M5 Max", prefix: "5DXDN2UR"),
-        TrackedMiner(label: "Mac Mini (Arnaud)", prefix: "5DFhoxZE")
+        TrackedMiner(label: "Mac Mini (Ronan)", prefix: "5TESTBBB"),
+        TrackedMiner(label: "MacBook Pro M5 Max", prefix: "5TESTAAA"),
+        TrackedMiner(label: "Mac Mini (Arnaud)", prefix: "5TESTCCC")
     ]
 }

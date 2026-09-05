@@ -102,7 +102,7 @@ enum MinerIdentity {
     }
 
     /// Last resort: the prefix the miner logged when it registered, e.g.
-    /// "✅ Miner 5DXDN2UR registered successfully in layer 1 on training epoch 55".
+    /// "✅ Miner 5TESTAAA registered successfully in layer 1 on training epoch 55".
     /// Only used when no wallet is readable.
     static func prefixFromLog(_ events: [LogEvent]) -> String? {
         for event in events.reversed() {

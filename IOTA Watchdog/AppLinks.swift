@@ -19,5 +19,5 @@ enum AppLinks {
     static let donation: URL? = nil
 
     /// Project home, used by "Report an issue" when set.
-    static let repository: URL? = nil
+    static let repository = URL(string: "https://github.com/Ronan-Le-Monit/IOTA-Miner-Watchdog")
 }
