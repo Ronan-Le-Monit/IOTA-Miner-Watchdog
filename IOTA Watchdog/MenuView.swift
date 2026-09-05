@@ -219,14 +219,26 @@ struct MenuView: View {
             // Hidden when nothing is configured, so a release never ships a dead button.
             if !AppLinks.donations.isEmpty {
                 HStack(spacing: 8) {
-                    Text("Support")
+                    Text("Support me")
                         .font(.system(size: 12, weight: .bold))
                         .foregroundStyle(Theme.activeGreen)
                     ForEach(AppLinks.donations) { link in
-                        Button(link.label) { NSWorkspace.shared.open(link.url) }
-                            .buttonStyle(DonationButtonStyle(
-                                background: Color(hex: link.brand),
-                                foreground: link.usesDarkLabel ? .black : .white))
+                        Button {
+                            NSWorkspace.shared.open(link.url)
+                        } label: {
+                            HStack(spacing: 5) {
+                                if let icon = link.iconAsset {
+                                    Image(icon)
+                                        .resizable()
+                                        .aspectRatio(contentMode: .fit)
+                                        .frame(height: 13)
+                                }
+                                Text(link.label)
+                            }
+                        }
+                        .buttonStyle(DonationButtonStyle(
+                            background: Color(hex: link.brand),
+                            foreground: link.usesDarkLabel ? .black : .white))
                     }
                     Spacer()
                 }
@@ -282,6 +294,7 @@ private struct DonationButtonStyle: ButtonStyle {
         configuration.label
             .font(.system(size: 11, weight: .semibold))
             .foregroundStyle(foreground)
+            .labelStyle(.titleAndIcon)
             .padding(.horizontal, 11)
             .padding(.vertical, 5)
             .background(
