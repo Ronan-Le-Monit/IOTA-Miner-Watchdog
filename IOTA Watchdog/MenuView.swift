@@ -14,6 +14,13 @@ struct MenuView: View {
     @ObservedObject var power: PowerMonitor
 
     @State private var launchAtLogin = false
+
+    /// Reads from the bundle rather than a literal, so it always matches the build.
+    private static var versionString: String {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
+        return "v\(version) (\(build))"
+    }
     @State private var launchError: String?
 
     var body: some View {
@@ -53,6 +60,12 @@ struct MenuView: View {
                     .font(.system(size: 10, weight: .semibold))
                     .tracking(1.4)
                     .foregroundStyle(Theme.titleText)
+                Spacer()
+                // Version in the corner: two Macs on different builds once looked like one
+                // build behaving inconsistently, and the log alone did not settle it quickly.
+                Text(Self.versionString)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(Theme.mutedText)
             }
 
             HStack(spacing: 8) {
