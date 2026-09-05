@@ -103,7 +103,11 @@ final class WatchdogCoordinator: ObservableObject {
     /// Starts polling. Safe to call once from the app's launch.
     func start() {
         guard pollTask == nil else { return }
-        logger.log("Watchdog started"
+        // The version goes in the first line so a log always says which build produced it.
+        // Two Macs running different builds looked like one build behaving inconsistently.
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
+        logger.log("Watchdog \(version) (\(build)) started"
             + " — auto-restart \(settings.autoRestartEnabled ? "on" : "off")"
             + ", keep-awake \(settings.keepAwakeEnabled ? "on" : "off")"
             + ", miner \(settings.localPrefix ?? "NOT IDENTIFIED")"
