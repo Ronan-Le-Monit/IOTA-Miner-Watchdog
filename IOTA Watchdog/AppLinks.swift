@@ -29,7 +29,10 @@ enum AppLinks {
     /// Built with `compactMap` rather than force-unwrapping, so a typo in a literal drops the
     /// one bad link instead of crashing the app on launch.
     static let donations: [DonationLink] = [
-        ("Ko-fi", "https://ko-fi.com/monit", UInt32(0xFF5E5B), false, nil),
+        // Ko-fi's supplied logomark is dark with an orange heart, so it needs a light
+        // background; their coral would swallow the heart. Buy Me a Coffee's yellow is the
+        // colour of their own button.
+        ("Ko-fi", "https://ko-fi.com/monit", UInt32(0xFFFFFF), true, "KofiIcon"),
         ("Buy Me a Coffee", "https://buymeacoffee.com/le_monit", UInt32(0xFFDD00), true, "BMCIcon")
     ].compactMap { label, string, brand, darkLabel, icon -> DonationLink? in
         URL(string: string).map {
