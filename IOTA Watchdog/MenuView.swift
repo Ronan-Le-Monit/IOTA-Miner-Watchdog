@@ -224,11 +224,14 @@ struct MenuView: View {
                         .foregroundStyle(Theme.activeGreen)
                     ForEach(AppLinks.donations) { link in
                         Button(link.label) { NSWorkspace.shared.open(link.url) }
-                            .font(.caption)
+                            .buttonStyle(DonationButtonStyle(
+                                background: Color(hex: link.brand),
+                                foreground: link.usesDarkLabel ? .black : .white))
                     }
                     Spacer()
                 }
-                .padding(.vertical, 14)
+                .padding(.top, 20)
+                .padding(.bottom, 20)
             }
 
             // Bottom row: the issue link on the left, Quit on the right. Both full size and
@@ -265,5 +268,25 @@ extension WatchdogCoordinator {
         guard let ac = sleep.ac, ac > 0, ac <= 5 else { return nil }
         return "This Mac sleeps after \(ac) min on power, which stops mining. "
              + "Turn on “Keep the Mac awake while training”."
+    }
+}
+
+
+/// Filled, rounded button in a service's own brand colour, so the donation links read as
+/// something friendly rather than as another grey system button.
+private struct DonationButtonStyle: ButtonStyle {
+    let background: Color
+    let foreground: Color
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(foreground)
+            .padding(.horizontal, 11)
+            .padding(.vertical, 5)
+            .background(
+                Capsule().fill(background.opacity(configuration.isPressed ? 0.7 : 1))
+            )
+            .contentShape(Capsule())
     }
 }

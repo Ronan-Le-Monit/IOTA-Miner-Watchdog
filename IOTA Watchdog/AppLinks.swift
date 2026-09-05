@@ -12,6 +12,12 @@ enum AppLinks {
     struct DonationLink: Identifiable {
         let label: String
         let url: URL
+        /// The service's brand colour, as 0xRRGGBB. Kept as a number so this file stays
+        /// Foundation-only; the view turns it into a Color.
+        let brand: UInt32
+        /// Brand colours differ wildly in brightness, so each link says whether its label
+        /// should be dark. White on Buy Me a Coffee's yellow is unreadable.
+        let usesDarkLabel: Bool
         var id: String { url.absoluteString }
     }
 
@@ -20,10 +26,12 @@ enum AppLinks {
     /// Built with `compactMap` rather than force-unwrapping, so a typo in a literal drops the
     /// one bad link instead of crashing the app on launch.
     static let donations: [DonationLink] = [
-        ("Ko-fi", "https://ko-fi.com/monit"),
-        ("Buy Me a Coffee", "https://buymeacoffee.com/le_monit")
-    ].compactMap { label, string in
-        URL(string: string).map { DonationLink(label: label, url: $0) }
+        ("Ko-fi", "https://ko-fi.com/monit", UInt32(0xFF5E5B), false),
+        ("Buy Me a Coffee", "https://buymeacoffee.com/le_monit", UInt32(0xFFDD00), true)
+    ].compactMap { label, string, brand, darkLabel in
+        URL(string: string).map {
+            DonationLink(label: label, url: $0, brand: brand, usesDarkLabel: darkLabel)
+        }
     }
 
     /// Project home, used by "Report an issue".
