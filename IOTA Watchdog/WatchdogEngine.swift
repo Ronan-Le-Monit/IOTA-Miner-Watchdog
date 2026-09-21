@@ -317,12 +317,56 @@ final class WatchdogEngine: ObservableObject {
 
             case .orchestratorUnreachable:
                 outageEventTimes.append(event.timestamp)
+
+            case .runNamed(let runID):
+                // Every heartbeat carries this, so it is recorded only when it changes.
+                // A change is genuinely worth knowing: it is the only signal that the
+                // orchestrator has moved this miner to a different run.
+                if namedRunID != runID {
+                    record("Orchestrator assigned run \(runID)", notable: true)
+                    namedRunID = runID
+                }
+
+            case .joiningWaitlist:
+                joinedWaitlistAt = event.timestamp
+
+            case .queueState(let detail):
+                // The worker advertises this capability but has never emitted one here, so the
+                // payload is logged verbatim the first time it appears rather than guessed at.
+                if lastQueueState != detail {
+                    lastQueueState = detail
+                    record("Queue state: \(detail.isEmpty ? "(no payload)" : detail)", notable: true)
+                }
             }
         }
 
         // Keep only the outage events inside the window.
         let cutoff = now().addingTimeInterval(-config.outageWindow)
         outageEventTimes.removeAll { $0 < cutoff }
+    }
+
+    /// The run the orchestrator last named for this miner. Known from the log even while the
+    /// miner is still queueing, i.e. before it appears in the API's miner list.
+    private(set) var namedRunID: String?
+    /// When the miner last asked to join the registration waitlist.
+    private(set) var joinedWaitlistAt: Date?
+    /// The raw payload of the most recent `register.queue_state` message, if one has ever come.
+    private(set) var lastQueueState: String?
+
+    /// A queue position parsed out of the worker's queue-state payload.
+    ///
+    /// Returns nil unless the payload actually contains a position, which it never has on any
+    /// log seen so far. Showing an invented number would be worse than showing nothing.
+    var queuePosition: Int? {
+        guard let payload = lastQueueState else { return nil }
+        for key in ["position", "place", "rank", "index"] {
+            guard let range = payload.range(of: key) else { continue }
+            let digits = payload[range.upperBound...]
+                .drop { !$0.isNumber }
+                .prefix { $0.isNumber }
+            if let value = Int(digits) { return value }
+        }
+        return nil
     }
 
     /// Records the latest local process observation.

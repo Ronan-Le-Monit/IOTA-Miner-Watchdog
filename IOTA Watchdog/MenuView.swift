@@ -130,7 +130,21 @@ struct MenuView: View {
                 if let activations = api.activationCount {
                     row("Activations", "\(activations)")
                 }
-                if let run = api.runID { row("Run", run) }
+                if let run = api.runID {
+                    row("Run", run)
+                } else if let queued = api.queueingForRunID {
+                    // Not in any run yet. Name what it is waiting for rather than showing
+                    // nothing, which reads as if the watchdog has lost track of the miner.
+                    row("Queueing for", queued)
+                }
+                if let occupancy = api.occupancy {
+                    row("Run capacity", occupancy.summary)
+                }
+                // Only ever shown when the worker actually reported a position. It advertises
+                // the capability on every connection but has not yet sent one.
+                if let position = engine.queuePosition {
+                    row("Queue position", "#\(position)")
+                }
                 if !api.reachable { row("API", "unreachable") }
             }
             if let sleep = coordinator.sleepWarning {

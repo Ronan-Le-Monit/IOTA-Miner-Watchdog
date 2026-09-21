@@ -23,7 +23,8 @@ itself.
 ## What it watches
 
 Every 30 seconds it reads the miner's log, checks whether the worker process is alive, and every
-five minutes asks the public Macrocosmos API whether your activations are still climbing.
+five minutes asks the public Macrocosmos API whether your activations are still climbing, which
+run you are in, and how full every run is.
 
 It restarts the miner when:
 
@@ -52,9 +53,11 @@ cannot start is not thrashed.
   the run's sync schedule and shows `Waiting for network sync (~HH:MM)` instead.
 - **It does not restart when the whole run has stalled.** A run can stop syncing while your
   miner is perfectly healthy. Restarting cannot help, because the orchestrator puts you straight
-  back into the same run. Measured on 6 September: one run had last synced 63.9 hours earlier
-  while the other nine had all synced within the hour. The app compares your run's sync age
-  against every other run and reports `Run has stalled` instead of restarting.
+  back into the same run — measured here as 3,269 identical answers over nine days, across 182
+  re-registrations. On 19 September one run had gone 189 hours without syncing while seven of the
+  other eight had synced within two hours; its 120 miners had a median of 3 activations against
+  4,092 in a run of the same tier. The app compares your run's sync age against every other run
+  and reports `Run has stalled` instead of restarting.
 - **It does not restart during a network outage.** If the orchestrator is unreachable a restart
   cannot help, so it holds.
 - **It does not undo a stop you made yourself.** If you press Stop Training, it stays stopped.
@@ -97,6 +100,16 @@ hide the icon; open the app again from Applications to bring the window back.
 
 Open the menu bar icon. It shows the miner it is watching, whether the worker is running, how
 fresh the log is, when the last activation was, and your rank and activation count from the API.
+
+It also names the run you are in and how full it is, for example `120 / 120 (full)`. While the
+miner is between runs the same line reads **Queueing for** and names the run the orchestrator has
+put you down for, which it knows from your own log before the network lists you as a member.
+
+There is no queue *position*. The orchestrator does not send one: across nine days of logs here,
+none of 3,269 responses carried a position, place or queue size. The miner process advertises a
+`register.queue_state` message on every startup but has never actually sent one. The app reads
+that message and will show the position the moment one arrives, and writes the raw payload to its
+log so the format can be supported properly. Until then it shows nothing rather than a guess.
 
 Three switches:
 

@@ -34,6 +34,19 @@ enum LogEventKind: Equatable {
     case minerStarting
     /// "✅ Miner <prefix> registered successfully in layer N on training epoch N"
     case registered(prefix: String)
+
+    /// The run the orchestrator has named for this miner, from any response carrying
+    /// `'run_id'` (`/miner/get_run_config`, `/common/get_run_epoch`, the heartbeat).
+    /// This arrives *before* registration completes, so it is what the miner is queueing for.
+    case runNamed(runID: String)
+
+    /// "🔄 Attempting to join registration waitlist for pool miner <prefix>..."
+    case joiningWaitlist
+
+    /// A `register.queue_state` message from the worker's local node protocol, with whatever
+    /// payload it carried. The worker advertises this capability on every connection but has
+    /// never emitted one here, so the payload shape is unknown and is kept verbatim.
+    case queueState(detail: String)
     /// training.state accepted { state: '<state>' }
     case trainingState(TrainingState)
     /// "🔄 Resetting miner entire state!" — self-recovery after being kicked. NOT a failure.
@@ -168,6 +181,15 @@ struct LogParser {
 
         if body.contains("Resetting miner entire state") { return .resettingState }
 
+        // Like `control.stop` below, `register.queue_state` is also listed as a quoted entry in
+        // the startup capability list, so require the request/accept wording.
+        if body.contains("register.queue_state"),
+           body.contains("request received") || body.contains("accepted") {
+            return .queueState(detail: Self.trailingPayload(in: body))
+        }
+
+        if body.contains("registration waitlist") { return .joiningWaitlist }
+
         // `control.stop` also appears as a quoted entry in the startup capability list.
         // Those are continuation lines (no timestamp) so they never reach here, but require
         // the request/accept wording as well so a single-line variant can't fool us either.
@@ -216,6 +238,18 @@ struct LogParser {
                 return .layerPhaseChange(actual: MinerPhase(rawValue: actual),
                                          expected: MinerPhase(rawValue: expected ?? ""))
             }
+        }
+
+        // --- Which run the orchestrator has put this miner in. ---
+        //
+        // Deliberately after the progress signals: the heartbeat response also carries a
+        // `run_id`, and a heartbeat is the more useful reading of that line. Deliberately
+        // before the noise filter: these are otherwise indistinguishable from chatter, and
+        // `get_run_config` is the only thing that names the run while the miner is still
+        // queueing and therefore missing from the API's miner lists.
+
+        if body.contains("; response:"), let runID = Self.value(ofQuotedKey: "run_id", in: body) {
+            return .runNamed(runID: runID)
         }
 
         // --- Network outage evidence (checked before the noise filter deliberately) ---
@@ -293,6 +327,24 @@ struct LogParser {
         guard let close = afterOpen.firstIndex(of: "'") else { return nil }
         let value = afterOpen[..<close]
         return value.isEmpty ? nil : String(value)
+    }
+
+    /// Pulls `4.12.16.1-tah` out of `… response: {'run_id': '4.12.16.1-tah', 'epoch': 9}`.
+    /// The orchestrator's responses are logged as Python dict literals, so the value is
+    /// single-quoted rather than JSON.
+    static func value(ofQuotedKey key: String, in body: String) -> String? {
+        guard let keyRange = body.range(of: "'\(key)': '") else { return nil }
+        let rest = body[keyRange.upperBound...]
+        guard let end = rest.firstIndex(of: "'") else { return nil }
+        let value = String(rest[..<end])
+        return value.isEmpty ? nil : value
+    }
+
+    /// Everything from the first brace onwards, so an unknown message's payload is preserved
+    /// for the log rather than discarded.
+    static func trailingPayload(in body: String) -> String {
+        guard let brace = body.firstIndex(of: "{") else { return "" }
+        return String(body[brace...]).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// Pulls the miner prefix out of "✅ Miner 5TESTAAA registered successfully in layer 1 …".

@@ -154,7 +154,9 @@ final class WatchdogCoordinator: ObservableObject {
         if let prefix = settings.localPrefix,
            lastAPICheck == nil || now.timeIntervalSince(lastAPICheck!) >= apiInterval {
             lastAPICheck = now
-            let observation = await apiProbe.observe(prefix: prefix)
+            // The engine knows, from the log, which run the orchestrator named — including
+            // while the miner is still queueing and so absent from the API's miner lists.
+            let observation = await apiProbe.observe(prefix: prefix, queueingFor: engine.namedRunID)
             lastAPI = observation
             engine.ingestAPI(activationCount: observation.activationCount,
                              reachable: observation.reachable,

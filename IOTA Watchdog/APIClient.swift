@@ -18,6 +18,8 @@ protocol IOTAAPI: Sendable {
     func fetchSync(runID: String) async throws -> SyncInfo
     /// Training progress from `/progress?run_id=…`.
     func fetchProgress(runID: String) async throws -> ProgressInfo
+    /// How full every run is, from `/v1/runs_occupancy`.
+    func fetchOccupancy() async throws -> [String: RunOccupancy]
 }
 
 enum APIError: LocalizedError {
@@ -82,5 +84,9 @@ struct IOTAAPIClient: IOTAAPI {
 
     func fetchProgress(runID: String) async throws -> ProgressInfo {
         try await get("progress", query: ["run_id": runID], as: ProgressInfo.self)
+    }
+
+    func fetchOccupancy() async throws -> [String: RunOccupancy] {
+        try await get("v1/runs_occupancy", as: RunsOccupancyResponse.self).byRun
     }
 }

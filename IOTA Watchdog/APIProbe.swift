@@ -29,6 +29,11 @@ struct APIObservation: Equatable {
     var runSyncAge: TimeInterval?
     /// The median sync age across all active runs, for comparison.
     var medianSyncAge: TimeInterval?
+    /// How full the relevant run is — the run the miner is in, or the one it is queueing for.
+    var occupancy: RunOccupancy?
+    /// Set when the miner is in no run yet but the orchestrator has already named one for it.
+    /// This is what the miner is waiting to get into.
+    var queueingForRunID: String?
 
     /// True when this run has fallen far behind every other run, i.e. the run itself is dead
     /// rather than the miner. Restarting cannot help: the orchestrator puts the miner straight
@@ -52,7 +57,10 @@ struct APIProbe {
 
     /// Fetches all runs and finds the miner whose hotkey or coldkey starts with `prefix`.
     /// A single failing run does not fail the whole probe.
-    func observe(prefix: String) async -> APIObservation {
+    ///
+    /// `queueingFor` is the run the miner's own log says the orchestrator named for it. It is
+    /// used only when the miner is not yet in any run, to report what it is waiting to join.
+    func observe(prefix: String, queueingFor: String? = nil) async -> APIObservation {
         // Bind the client locally so `self` stays out of the concurrent closures below.
         let client = api
 
@@ -74,12 +82,21 @@ struct APIProbe {
             catch { minersByRun[runID] = [] }
         }
 
+        // Capacity of every run. Optional: an older deployment without this endpoint should
+        // cost the occupancy figures, not the whole probe.
+        let occupancyByRun = (try? await client.fetchOccupancy()) ?? [:]
+
         let tracked = TrackedMiner(label: "local", prefix: prefix)
         let result = MinerLookup.result(for: tracked, in: minersByRun)
 
         guard let miner = result.miner else {
-            // Reachable, but the miner is in no run. Not an outage.
-            return APIObservation(reachable: true)
+            // Reachable, but the miner is in no run — it is queueing. Report which run it is
+            // waiting for and how full that run is, which is the useful part of the wait.
+            return APIObservation(
+                reachable: true,
+                occupancy: queueingFor.flatMap { occupancyByRun[$0] },
+                queueingForRunID: queueingFor
+            )
         }
 
         // The synchronisation schedule of every run, not just ours. One run's sync age means
@@ -114,7 +131,8 @@ struct APIProbe {
             lastSyncAt: lastSyncAt,
             nextSyncAt: nextSyncAt,
             runSyncAge: ownAge,
-            medianSyncAge: median
+            medianSyncAge: median,
+            occupancy: occupancyByRun[miner.runId]
         )
     }
 }

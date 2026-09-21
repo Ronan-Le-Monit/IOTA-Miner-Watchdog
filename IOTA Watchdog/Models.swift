@@ -234,3 +234,62 @@ struct TrackedMiner: Identifiable, Codable, Equatable, Hashable {
         TrackedMiner(label: "Mac Mini (Arnaud)", prefix: "5TESTCCC")
     ]
 }
+
+// MARK: - /v1/runs_occupancy
+
+/// How full each run is. The API answers with four parallel arrays rather than a list of
+/// objects, so they are zipped back together here.
+struct RunsOccupancyResponse: Decodable {
+    let runIds: [String]
+    let maxMiners: [Int]
+    let activeMiners: [Int]
+    let slotsRemaining: [Int]
+
+    enum CodingKeys: String, CodingKey {
+        case runIds = "run_ids"
+        case maxMiners = "max_miners"
+        case activeMiners = "active_miners"
+        case slotsRemaining = "slots_remaining"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        runIds = (try? c.decode([String].self, forKey: .runIds)) ?? []
+        maxMiners = (try? c.decode([Int].self, forKey: .maxMiners)) ?? []
+        activeMiners = (try? c.decode([Int].self, forKey: .activeMiners)) ?? []
+        slotsRemaining = (try? c.decode([Int].self, forKey: .slotsRemaining)) ?? []
+    }
+
+    /// One entry per run. A run is skipped if any of its four values is missing, so a change
+    /// in the API's array lengths degrades to less data rather than to wrong data.
+    var byRun: [String: RunOccupancy] {
+        var result: [String: RunOccupancy] = [:]
+        for (index, runID) in runIds.enumerated() {
+            guard index < maxMiners.count,
+                  index < activeMiners.count,
+                  index < slotsRemaining.count else { continue }
+            result[runID] = RunOccupancy(
+                maxMiners: maxMiners[index],
+                activeMiners: activeMiners[index],
+                slotsRemaining: slotsRemaining[index]
+            )
+        }
+        return result
+    }
+}
+
+/// How many miners a run holds and how many more it will take.
+struct RunOccupancy: Equatable {
+    let maxMiners: Int
+    let activeMiners: Int
+    let slotsRemaining: Int
+
+    /// A full run cannot admit anyone until an existing miner drops out.
+    var isFull: Bool { slotsRemaining <= 0 && maxMiners > 0 }
+
+    /// "120 / 120 (full)" or "56 / 100 (44 free)".
+    var summary: String {
+        guard maxMiners > 0 else { return "\(activeMiners) miners" }
+        return "\(activeMiners) / \(maxMiners) (\(isFull ? "full" : "\(slotsRemaining) free"))"
+    }
+}
