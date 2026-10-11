@@ -30,6 +30,9 @@ final class WatchdogSettings: ObservableObject {
         var frozenMinutes: Int?
         var countdownSeconds: Int?
         var notificationsEnabled: Bool?
+        var noProgressRuleEnabled: Bool?
+        var resetLoopRuleEnabled: Bool?
+        var holdForRunStateEnabled: Bool?
     }
 
     @Published var autoRestartEnabled: Bool { didSet { save() } }
@@ -42,6 +45,10 @@ final class WatchdogSettings: ObservableObject {
     @Published var frozenMinutes: Int { didSet { save() } }
     @Published var countdownSeconds: Int { didSet { save() } }
     @Published var notificationsEnabled: Bool { didSet { save() } }
+    /// Optional rules, off by default. See `WatchdogConfig` for why.
+    @Published var noProgressRuleEnabled: Bool { didSet { save() } }
+    @Published var resetLoopRuleEnabled: Bool { didSet { save() } }
+    @Published var holdForRunStateEnabled: Bool { didSet { save() } }
 
     private let fileURL: URL
     /// Suppresses saving while the initial values are being assigned.
@@ -70,6 +77,9 @@ final class WatchdogSettings: ObservableObject {
         frozenMinutes = stored.frozenMinutes ?? 5
         countdownSeconds = stored.countdownSeconds ?? 60
         notificationsEnabled = stored.notificationsEnabled ?? true
+        noProgressRuleEnabled = stored.noProgressRuleEnabled ?? false
+        resetLoopRuleEnabled = stored.resetLoopRuleEnabled ?? false
+        holdForRunStateEnabled = stored.holdForRunStateEnabled ?? false
 
         applyLaunchArgumentOverrides()
         isLoading = false
@@ -87,6 +97,9 @@ final class WatchdogSettings: ObservableObject {
         }
         if let value = bool("autoRestartEnabled") { autoRestartEnabled = value }
         if let value = bool("keepAwakeEnabled") { keepAwakeEnabled = value }
+        if let value = bool("noProgressRuleEnabled") { noProgressRuleEnabled = value }
+        if let value = bool("resetLoopRuleEnabled") { resetLoopRuleEnabled = value }
+        if let value = bool("holdForRunStateEnabled") { holdForRunStateEnabled = value }
         if let value = arguments["localPrefix"] as? String { localPrefixOverride = value }
     }
 
@@ -98,7 +111,10 @@ final class WatchdogSettings: ObservableObject {
                             noProgressMinutes: noProgressMinutes,
                             frozenMinutes: frozenMinutes,
                             countdownSeconds: countdownSeconds,
-                            notificationsEnabled: notificationsEnabled)
+                            notificationsEnabled: notificationsEnabled,
+                            noProgressRuleEnabled: noProgressRuleEnabled,
+                            resetLoopRuleEnabled: resetLoopRuleEnabled,
+                            holdForRunStateEnabled: holdForRunStateEnabled)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         guard let data = try? encoder.encode(stored) else { return }
@@ -132,6 +148,9 @@ final class WatchdogSettings: ObservableObject {
         config.noProgressThreshold = TimeInterval(noProgressMinutes * 60)
         config.frozenThreshold = TimeInterval(frozenMinutes * 60)
         config.confirmationCountdown = TimeInterval(countdownSeconds)
+        config.noProgressRuleEnabled = noProgressRuleEnabled
+        config.resetLoopRuleEnabled = resetLoopRuleEnabled
+        config.holdForRunStateEnabled = holdForRunStateEnabled
         return config
     }
 

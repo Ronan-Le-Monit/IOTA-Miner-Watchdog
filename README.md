@@ -26,18 +26,23 @@ Every 30 seconds it reads the miner's log, checks whether the worker process is 
 five minutes asks the public Macrocosmos API whether your activations are still climbing, which
 run you are in, and how full every run is.
 
-It restarts the miner when:
+By default it restarts the miner only on direct evidence that something has stopped:
 
 | Trigger | Condition |
 |---|---|
-| Crash or clean shutdown | A fatal error or a shutdown line, and the worker is gone |
+| **Miner shut down** | The miner logs `🛑 Miner shutdown complete` |
+| Fatal error | The miner logs a critical error; the watchdog waits up to 5 minutes for it to finish cleaning up and shut down |
 | Worker vanished | No worker process for two consecutive checks |
 | Frozen | The process is alive but has written nothing for 5 minutes |
-| No progress | Nothing for 60 minutes, confirmed by the API not crediting activations |
-| Sustained reset loop | 5+ resets spanning at least an hour, with the API crediting nothing |
+| App quit | IOTA Train at Home is not running at all, so it is relaunched |
 
-The last two both require the public API to agree before anything happens. Log evidence alone is
-never enough, because a miner can look idle in its log while the network is still crediting it.
+The shutdown line is the most important of these. The IOTA app never restarts a miner that has
+shut down: on 8 October a Mac Mini here hit a fatal error, spent 2 min 41 s cleaning up, logged
+`Miner shutdown complete`, and then sat idle for ten minutes until someone intervened. The
+watchdog gives the process 60 seconds to exit after that line and then restarts regardless,
+because the miner process can stay listed after training has ended. A shutdown is acted on even
+straight after a start, and even when the run itself looks dead: a miner that has shut down is not
+training either way.
 
 Before every automatic restart a window appears with a 60 second countdown, the reason, and the
 log line behind it. Cancel stops it and suspends automatic restarts until the miner runs again.
@@ -45,27 +50,43 @@ log line behind it. Cancel stops it and suspends automatic restarts until the mi
 Restarts are capped at three per hour with at least ten minutes between them, so a miner that
 cannot start is not thrashed.
 
+### Optional rules, off by default
+
+Three more rules are available under **Optional rules** in the menu. They are off by default
+because each depends on inference, and each has been wrong in practice. Between 2 and 4 October a
+miner stuck in its `initializing` state was restarted about 73 times by the no-progress rule to no
+effect; what fixed it was pressing **Recover** in the IOTA app. Switch them on if you want them.
+
+| Rule | What it does when switched on |
+|---|---|
+| No progress | Restarts after 60 minutes without an activation, if the public API agrees nothing is being credited |
+| Reset loop | Restarts a miner that has reset 5+ times over at least an hour, again only with the API agreeing |
+| Hold for the run's state | Holds off restarting while the whole run has stalled or the miner is waiting for the next network sync |
+
+About the hold: a miner that registers mid-epoch cannot train until the run's next full
+synchronisation, one to two hours away, and restarting it makes it miss that sync too. And a run
+can stop syncing altogether, in which case restarting cannot help, because the orchestrator puts
+you straight back into the same run: measured here as 3,269 identical answers over nine days,
+across 182 re-registrations. On 19 September one run had gone 189 hours without syncing while
+seven of the other eight had synced within two hours; its 120 miners had a median of 3 activations
+against 4,092 in a run of the same tier.
+
+With the hold switched off, both conditions are still **shown** in the menu, as
+`Waiting for network sync (~HH:MM)` and `Run has stalled`. They just no longer block a restart.
+
 ## What it deliberately does not do
 
-- **It does not restart a miner that is waiting for the network.** A miner that registers
-  mid-epoch cannot train until the run's next full synchronisation, which is one to two hours
-  away. Restarting there makes it worse: it re-registers and misses that sync too. The app reads
-  the run's sync schedule and shows `Waiting for network sync (~HH:MM)` instead.
-- **It does not restart when the whole run has stalled.** A run can stop syncing while your
-  miner is perfectly healthy. Restarting cannot help, because the orchestrator puts you straight
-  back into the same run — measured here as 3,269 identical answers over nine days, across 182
-  re-registrations. On 19 September one run had gone 189 hours without syncing while seven of the
-  other eight had synced within two hours; its 120 miners had a median of 3 activations against
-  4,092 in a run of the same tier. The app compares your run's sync age against every other run
-  and reports `Run has stalled` instead of restarting.
+- **It does not undo a stop you made yourself.** If you press Stop Training, it stays stopped,
+  including while the miner is still winding down.
 - **It does not restart during a network outage.** If the orchestrator is unreachable a restart
-  cannot help, so it holds.
-- **It does not undo a stop you made yourself.** If you press Stop Training, it stays stopped.
-- **It does not restart a miner that is still trying to join a run.** When a batch of runs goes
-  live, joining legitimately involves cycling through reset and registration, sometimes for
-  twenty to sixty minutes, before getting in. That looks identical to a broken miner for the
-  first hour, so the reset-loop rule needs a loop lasting longer than that *and* API
-  confirmation. Thanks to Moonlit on the Macrocosmos Discord for pointing this out.
+  cannot help, so the frozen rule, and any optional rule you have switched on, holds.
+- **It does not restart a miner that is still trying to join a run**, when the reset-loop rule is
+  on. Joining legitimately involves cycling through reset and registration, sometimes for twenty
+  to sixty minutes, so the rule needs a loop lasting longer than that *and* API confirmation.
+  Thanks to Moonlit on the Macrocosmos Discord for pointing this out.
+- **It does not fix a miner stuck initializing.** A miner that is alive and busy but turns down
+  every piece of work with `NACK (status=initializing)` is not cured by a restart. The cure seen
+  so far is the **Recover** button in the IOTA app.
 - **It ignores the noisy stuff.** NaN losses, stale requests, attestation retries, peer timeouts
   and high GPU memory warnings all look alarming in the log and are all normal.
 
@@ -117,6 +138,9 @@ Three switches:
   relaunches another app, so turn it on knowingly and watch the first restart.
 - **Keep the Mac awake while training.** On by default.
 - **Start the watchdog at login.** Off by default. The app must be in `/Applications` for this.
+
+Below them, **Optional rules** holds the three rules described above, all off until you switch
+them on.
 
 Which miner it watches is worked out from the Bittensor wallet on your Mac. Only the public
 address is read. If you run several wallets, type the hotkey prefix into the field yourself.

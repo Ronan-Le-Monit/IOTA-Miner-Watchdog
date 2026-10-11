@@ -183,6 +183,19 @@ struct MenuView: View {
                 Text(launchError).font(.caption).foregroundStyle(Theme.inactiveRed)
             }
 
+            // Off by default: each depends on inference that has misfired in practice.
+            DisclosureGroup("Optional rules") {
+                VStack(alignment: .leading, spacing: 6) {
+                    Toggle("Restart after \(settings.noProgressMinutes) min without an activation",
+                           isOn: $settings.noProgressRuleEnabled)
+                    Toggle("Restart a miner stuck in a reset loop",
+                           isOn: $settings.resetLoopRuleEnabled)
+                    Toggle("Hold restarts while the run is stalled or waiting for sync",
+                           isOn: $settings.holdForRunStateEnabled)
+                }
+                .padding(.top, 4)
+            }
+
             HStack(spacing: 6) {
                 Text("Hotkey")
                     .font(.caption)

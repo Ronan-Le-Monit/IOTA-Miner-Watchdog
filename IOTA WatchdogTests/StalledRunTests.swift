@@ -65,7 +65,7 @@ final class StalledRunBehaviourTests: XCTestCase {
     override func setUp() async throws {
         clock = Clock()
         let clock = self.clock!
-        engine = WatchdogEngine(config: WatchdogConfig()) { clock.current }
+        engine = WatchdogEngine(config: .withOptionalRules) { clock.current }
     }
 
     private func running() -> ProcessSnapshot {

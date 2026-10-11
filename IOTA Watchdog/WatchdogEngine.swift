@@ -32,6 +32,12 @@ struct WatchdogConfig: Equatable {
     var wakeGrace: TimeInterval = 10 * 60
     /// The worker must look gone for this many consecutive polls before we call it stopped.
     var stoppedConfirmations = 2
+    /// After `Miner shutdown complete`, how long to let the worker process exit on its own before
+    /// restarting anyway. The worker host can outlive its training loop.
+    var shutdownExitWait: TimeInterval = 60
+    /// After a fatal error, how long to wait for the miner to finish cleaning up and log
+    /// `Miner shutdown complete`. Measured on the Mac Mini, 2026-10-08: 2 min 41 s.
+    var fatalCleanupWait: TimeInterval = 5 * 60
     /// Restarts allowed in any rolling hour.
     var maxRestartsPerHour = 3
     /// Never restart twice within this window.
@@ -61,6 +67,20 @@ struct WatchdogConfig: Equatable {
     var localPrefix: String?
     /// Master switch for automatic restarts.
     var autoRestartEnabled = true
+
+    // Optional rules, all off by default (2026-10-11). Each relies on inference — about progress,
+    // about join loops, about the state of the run — and each has been wrong in practice: a
+    // miner stuck `initializing` was restarted ~73 times to no effect, and a dead run kept the
+    // watchdog holding off for days. The rules that remain on are the ones with direct evidence:
+    // the miner said it shut down, its process vanished, its log went silent, the app quit.
+
+    /// Restart after `noProgressThreshold` without an activation, confirmed by the API.
+    var noProgressRuleEnabled = false
+    /// Restart a sustained reset/re-register loop, confirmed by the API.
+    var resetLoopRuleEnabled = false
+    /// Hold restarts while the run has stalled or the miner is waiting for the next network
+    /// sync. When off, both are still *shown*, they just no longer block a restart.
+    var holdForRunStateEnabled = false
 }
 
 // MARK: - State
@@ -430,20 +450,41 @@ final class WatchdogEngine: ObservableObject {
             return .launchHostApp
         }
 
-        // A deliberate stop wins over every automatic rule.
-        if userStopped, !snapshot.workerRunning {
+        // A deliberate stop wins over every automatic rule, including while the worker process
+        // is still winding down after the shutdown it was asked for.
+        if userStopped, !snapshot.workerRunning || lastShutdownAt != nil {
             state = .stoppedByUser
             return .doNothing
         }
 
-        // --- Rule 1: fatal error or clean shutdown, the fast path. ---
-        let fatalIsRecent = lastFatal.map { currentTime.timeIntervalSince($0.at) < 5 * 60 } ?? false
-        let shutdownSeen = lastShutdownAt != nil && !snapshot.workerRunning
-
-        if (fatalIsRecent || shutdownSeen), !snapshot.workerRunning {
+        // --- Rule 1: the miner is no longer training. The most important rule. ---
+        //
+        // `🛑 Miner shutdown complete` means training has ended, whatever the process table says,
+        // and nothing will restart it: the IOTA app never does. On the Mac Mini on 2026-10-08 the
+        // miner sat idle for ten minutes after it until someone intervened.
+        //
+        // Timing, from that same log:
+        //   10:29:30  ❌ Critical error in run_miner (NaN pseudo gradients)
+        //   10:32:11  🛑 Miner shutdown complete      — 2 min 41 s of cleanup in between
+        // So a fatal error starts a wait for the shutdown line (up to `fatalCleanupWait`), and the
+        // shutdown line starts a short wait for the process to exit (`shutdownExitWait`). After
+        // either, restart regardless of whether a worker process is still listed; the restarter
+        // reaps whatever is left. The old rule waited for the process to vanish, with no limit.
+        //
+        // Checked before the grace periods, the stalled-run rule and the sync wait on purpose:
+        // those describe a miner that is still training. This one is not.
+        //
+        // Both signals are cleared by the next `🚀 Starting miner`, so a fatal error or shutdown
+        // the miner recovers from by itself never reaches here, and an old one is never stale.
+        if lastShutdownAt != nil || lastFatal != nil {
+            let deadline = lastShutdownAt.map { $0.addingTimeInterval(config.shutdownExitWait) }
+                ?? lastFatal!.at.addingTimeInterval(config.fatalCleanupWait)
+            if snapshot.workerRunning, currentTime < deadline {
+                state = .settling(reason: "miner shutting down")
+                return .doNothing
+            }
             state = .stopped
-            let trigger: RestartTrigger = lastFatal.map { .fatalError(reason: $0.reason) }
-                ?? .shutdown
+            let trigger: RestartTrigger = lastFatal.map { .fatalError(reason: $0.reason) } ?? .shutdown
             return propose(trigger, at: currentTime)
         }
 
@@ -478,7 +519,7 @@ final class WatchdogEngine: ObservableObject {
         // reassigns a restarted miner to the same run, so restarting only costs re-registration
         // time, repeatedly. Observed 2026-09-06: a run 63.9 hours behind while nine others had
         // synced within the hour. The fix is a different run, which is not ours to arrange.
-        if let stalledHours = runStalledForHours {
+        if config.holdForRunStateEnabled, let stalledHours = runStalledForHours {
             state = .runStalled(hours: stalledHours)
             return suppressedRestartForStalledRun(at: currentTime)
         }
@@ -501,7 +542,7 @@ final class WatchdogEngine: ObservableObject {
         //
         // A miner that registered mid-epoch is idle by design until the next sync. Restarting
         // makes it worse: it re-registers, misses that sync too, and waits for the one after.
-        if isWaitingForSync, let next = nextSyncAt {
+        if config.holdForRunStateEnabled, isWaitingForSync, let next = nextSyncAt {
             state = .waitingForSync(until: next)
             return .doNothing
         }
@@ -514,7 +555,8 @@ final class WatchdogEngine: ObservableObject {
         // the miner is being credited with nothing. A wrong restart here slows the whole run,
         // which is far worse than noticing late.
         let resets = recentResetCount
-        if resets >= config.resetLoopThreshold,
+        if config.resetLoopRuleEnabled,
+           resets >= config.resetLoopThreshold,
            resetLoopDuration >= config.resetLoopMinimumDuration,
            apiActivationsAreStalled(at: currentTime, for: config.resetLoopMinimumDuration) {
             if outageActive {
@@ -527,8 +569,8 @@ final class WatchdogEngine: ObservableObject {
                            at: currentTime)
         }
 
-        // --- Rule 4: alive and writing, but no training progress. ---
-        if let baseline = progressBaseline {
+        // --- Rule 4 (optional): alive and writing, but no training progress. ---
+        if config.noProgressRuleEnabled, let baseline = progressBaseline {
             let progressAge = currentTime.timeIntervalSince(baseline)
             let apiStalled = apiActivationsChangedAt.map {
                 currentTime.timeIntervalSince($0) >= config.noProgressThreshold
@@ -544,11 +586,19 @@ final class WatchdogEngine: ObservableObject {
             }
         }
 
-        // Healthy.
+        // Healthy, as far as the enabled rules can tell.
         pendingTrigger = nil
         suppressedTrigger = nil
         resetTimes.removeAll()
-        state = lastPhase == .training ? .training : .otherPhase(lastPhase)
+        // With the hold switched off these no longer block anything, but a dead run or a queued
+        // miner is still worth saying, rather than claiming "Training".
+        if let stalledHours = runStalledForHours {
+            state = .runStalled(hours: stalledHours)
+        } else if isWaitingForSync, let next = nextSyncAt {
+            state = .waitingForSync(until: next)
+        } else {
+            state = lastPhase == .training ? .training : .otherPhase(lastPhase)
+        }
         return .doNothing
     }
 
@@ -606,7 +656,8 @@ final class WatchdogEngine: ObservableObject {
     /// When the no-progress rule will fire if nothing changes, so the UI can say what is going
     /// to happen instead of appearing to do nothing.
     var noProgressDeadline: Date? {
-        progressBaseline?.addingTimeInterval(config.noProgressThreshold)
+        guard config.noProgressRuleEnabled else { return nil }
+        return progressBaseline?.addingTimeInterval(config.noProgressThreshold)
     }
 
     /// How long the miner has gone without any sign of training progress.
