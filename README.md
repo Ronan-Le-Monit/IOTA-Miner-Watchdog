@@ -33,7 +33,7 @@ By default it restarts the miner only on direct evidence that something has stop
 | **Miner shut down** | The miner logs `🛑 Miner shutdown complete` |
 | Fatal error | The miner logs a critical error; the watchdog waits up to 5 minutes for it to finish cleaning up and shut down |
 | Worker vanished | No worker process for two consecutive checks |
-| Frozen | The process is alive but has written nothing for 5 minutes |
+| Frozen | The process is alive but has written nothing at all for 5 minutes |
 | App quit | IOTA Train at Home is not running at all, so it is relaunched |
 
 The shutdown line is the most important of these. The IOTA app never restarts a miner that has
@@ -43,6 +43,13 @@ watchdog gives the process 60 seconds to exit after that line and then restarts 
 because the miner process can stay listed after training has ended. A shutdown is acted on even
 straight after a start, and even when the run itself looks dead: a miner that has shut down is not
 training either way.
+
+A miner **waiting in the registration queue** is never restarted. While queued it does nothing
+but poll its place, about once a minute, and the menu shows `Queued — position #38`. On
+11 October an earlier version restarted a miner that had been queued for two hours, calling it
+frozen, because it did not recognise any of the queue lines. "Frozen" now means the miner has
+stopped writing anything, not that it has stopped writing lines the watchdog understands. If the
+queue itself stops reporting for ten minutes, the normal rules apply again.
 
 Before every automatic restart a window appears with a 60 second countdown, the reason, and the
 log line behind it. Cancel stops it and suspends automatic restarts until the miner runs again.
@@ -122,15 +129,16 @@ hide the icon; open the app again from Applications to bring the window back.
 Open the menu bar icon. It shows the miner it is watching, whether the worker is running, how
 fresh the log is, when the last activation was, and your rank and activation count from the API.
 
-It also names the run you are in and how full it is, for example `120 / 120 (full)`. While the
-miner is between runs the same line reads **Queueing for** and names the run the orchestrator has
-put you down for, which it knows from your own log before the network lists you as a member.
+It also names the run you are in and how full it is, for example `120 / 120 (full)`. Just after
+the orchestrator assigns a run, and before the network lists you as a member, the same line reads
+**Queueing for** and names that run, which the watchdog reads from your own log.
 
-There is no queue *position*. The orchestrator does not send one: across nine days of logs here,
-none of 3,269 responses carried a position, place or queue size. The miner process advertises a
-`register.queue_state` message on every startup but has never actually sent one. The app reads
-that message and will show the position the moment one arrives, and writes the raw payload to its
-log so the format can be supported properly. Until then it shows nothing rather than a guess.
+While the miner is queueing for a place, the menu shows its **queue position** as the
+orchestrator reports it. Expect it to jump around: on 11 October it went from #1029 to #341, then
+between roughly #190 and #890 for an hour and a half, before settling at #38. A place can also
+expire, in which case the miner joins again and the history notes it. The IOTA app itself cannot
+show this yet; it answers the miner's attempts to pass the position on with
+`No handler for register.queue_state`.
 
 Three switches:
 

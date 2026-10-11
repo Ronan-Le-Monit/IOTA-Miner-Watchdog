@@ -43,6 +43,16 @@ enum LogEventKind: Equatable {
     /// "🔄 Attempting to join registration waitlist for pool miner <prefix>..."
     case joiningWaitlist
 
+    /// The orchestrator's answer about this miner's place in the registration queue, from
+    /// `POST /miner/register` or `GET /miner/register/status/<queue_id>`:
+    /// `{'queue_id': '…', 'status': 'queued', 'position': 38, 'poll_after…`
+    /// Status seen so far: `queued`, and `expired` (with `'position': None`), after which the
+    /// miner joins again under a new queue id. First observed 2026-10-11.
+    case registrationQueue(status: String, position: Int?)
+
+    /// `/miner/get_run_config` answered `EntityNotRegisteredError`: the miner is in no run.
+    case notRegistered
+
     /// A `register.queue_state` message from the worker's local node protocol, with whatever
     /// payload it carried. The worker advertises this capability on every connection but has
     /// never emitted one here, so the payload shape is unknown and is kept verbatim.
@@ -240,6 +250,18 @@ struct LogParser {
             }
         }
 
+        // --- Registration queue. ---
+
+        if body.contains("request to /miner/register"), body.contains("; response:"),
+           let status = Self.value(ofQuotedKey: "status", in: body),
+           body.contains("'queue_id'") {
+            return .registrationQueue(status: status, position: Self.position(in: body))
+        }
+
+        if body.contains("; response:"), body.contains("EntityNotRegisteredError") {
+            return .notRegistered
+        }
+
         // --- Which run the orchestrator has put this miner in. ---
         //
         // Deliberately after the progress signals: the heartbeat response also carries a
@@ -340,6 +362,28 @@ struct LogParser {
         return value.isEmpty ? nil : value
     }
 
+    /// The `'position': 38` in a queue response, or nil for `'position': None`.
+    static func position(in body: String) -> Int? {
+        guard let range = body.range(of: "'position': ") else { return nil }
+        return Int(body[range.upperBound...].prefix { $0.isNumber })
+    }
+
+    /// True for a line the Python worker wrote, as opposed to the Electron host. Worker lines
+    /// carry their own timestamp and level after the Electron prefix:
+    /// `2026-10-11 23:22:45.489 | WARNING  | miner.utils…`
+    /// Every such line is proof the worker is alive, even the ones this parser ignores.
+    static func isWorkerLine(_ body: String) -> Bool {
+        // `body` still starts with the Electron level tag: " [info]  2026-10-11 23:22:45.489 | …"
+        var rest = Substring(body).drop { $0 == " " }
+        if rest.first == "[", let close = rest.firstIndex(of: "]") {
+            rest = rest[rest.index(after: close)...].drop { $0 == " " }
+        }
+        let chars = Array(rest.prefix(26))
+        guard chars.count == 26 else { return false }
+        return chars[4] == "-" && chars[7] == "-" && chars[10] == " " && chars[13] == ":"
+            && chars[16] == ":" && chars[19] == "." && chars[23] == " " && chars[24] == "|"
+    }
+
     /// Everything from the first brace onwards, so an unknown message's payload is preserved
     /// for the log rather than discarded.
     static func trailingPayload(in body: String) -> String {
@@ -381,8 +425,16 @@ struct LogLineStream {
     }
     private var pending: PendingBlock?
 
+    /// When the Python worker last wrote any line at all. Used for the frozen rule, which must
+    /// not depend on whether the parser happens to recognise what the worker is saying: a
+    /// miner waiting in the registration queue writes only lines the parser ignores.
+    private(set) var lastWorkerLineAt: Date?
+
     /// Consumes one line and returns the event it produced, if any.
     mutating func consume(_ line: String) -> LogEvent? {
+        if let (timestamp, body) = LogParser.splitPrefix(line), LogParser.isWorkerLine(body) {
+            lastWorkerLineAt = max(lastWorkerLineAt ?? .distantPast, timestamp)
+        }
         // Inside a multi-line block: collect fields until the closing brace.
         if var block = pending {
             let trimmed = line.trimmingCharacters(in: .whitespaces)

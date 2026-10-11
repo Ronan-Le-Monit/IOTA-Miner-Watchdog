@@ -142,6 +142,7 @@ final class WatchdogCoordinator: ObservableObject {
         // 1. Logs.
         let events = tailer.poll()
         if !events.isEmpty { engine.ingest(events) }
+        if let lastLine = tailer.lastWorkerLineAt { engine.noteWorkerOutput(at: lastLine) }
 
         // 2. Local processes.
         let snapshot = await probe.snapshot()
@@ -182,7 +183,7 @@ final class WatchdogCoordinator: ObservableObject {
         let decision = engine.evaluate()
 
         // Record every state transition with the evidence behind it, so the log explains itself.
-        if engine.state != lastLoggedState {
+        if engine.state.logKey != lastLoggedState?.logKey {
             lastLoggedState = engine.state
             logger.log("State: \(engine.state.label)"
                 + " | worker \(workerText)"

@@ -8,6 +8,13 @@
 import SwiftUI
 
 extension WatchdogState {
+    /// The state without detail that changes on every poll, for deciding whether a transition
+    /// is worth a log line. A queue position moved by hundreds between polls on 2026-10-11.
+    var logKey: WatchdogState {
+        if case .queued = self { return .queued(position: nil) }
+        return self
+    }
+
 
     /// Short label for the menu header.
     var label: String {
@@ -21,6 +28,8 @@ extension WatchdogState {
             case .other: return "Running"
             }
         case .settling(let reason): return "Settling (\(reason))"
+        case .queued(let position):
+            return position.map { "Queued — position #\($0)" } ?? "Queued for a run"
         case .waitingForSync(let until):
             let formatter = DateFormatter()
             formatter.dateFormat = "HH:mm"
@@ -42,7 +51,7 @@ extension WatchdogState {
     var tint: Color {
         switch self {
         case .training: return Theme.activeGreen
-        case .otherPhase, .settling, .waitingForSync: return Color(hex: 0xFBBF24)
+        case .otherPhase, .settling, .waitingForSync, .queued: return Color(hex: 0xFBBF24)
         case .stopped, .frozen, .needsAttention: return Theme.inactiveRed
         case .notProgressing, .runStalled: return Color(hex: 0xFB923C)
         case .networkOutage: return Color(hex: 0xFB923C)
@@ -58,6 +67,7 @@ extension WatchdogState {
         case .otherPhase: return "cube"
         case .settling: return "clock"
         case .waitingForSync: return "clock.badge"
+        case .queued: return "list.number"
         case .stopped, .frozen: return "exclamationmark.triangle.fill"
         case .notProgressing: return "exclamationmark.circle"
         case .networkOutage: return "wifi.slash"

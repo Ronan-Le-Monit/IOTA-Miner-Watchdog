@@ -26,6 +26,9 @@ private final class FollowedFile {
     private var partial = Data()
     /// Reassembles multi-line Electron objects (see LogLineStream).
     private var stream = LogLineStream()
+    /// When the Python worker last wrote a line to this file. Kept here rather than read from
+    /// `stream`, which is replaced on rotation.
+    private(set) var lastWorkerLineAt: Date?
 
     /// How much of an already-large file to read when we first open it. Everything older than
     /// this is history we cannot act on anyway. ~100 KB of cli.log is about one minute.
@@ -112,6 +115,9 @@ private final class FollowedFile {
                 ?? String(decoding: lineData, as: UTF8.self)
             if let event = stream.consume(line) { events.append(event) }
         }
+        if let seen = stream.lastWorkerLineAt {
+            lastWorkerLineAt = max(lastWorkerLineAt ?? .distantPast, seen)
+        }
         // Compact so `partial` doesn't keep a growing slice's backing store alive.
         partial = Data(partial)
         return events
@@ -154,6 +160,9 @@ final class LogTailer {
     /// The cli.log currently being followed, if any. Exposed for `logAge`.
     var currentCLIURL: URL? { cliURL }
 
+    /// When the Python worker last wrote any line, recognised or not, across day changes.
+    private(set) var lastWorkerLineAt: Date?
+
     /// Modification time of the followed cli.log — the "is the worker still writing?" signal.
     var cliModifiedAt: Date? {
         guard let cliURL,
@@ -171,7 +180,12 @@ final class LogTailer {
         let newestCLI = newestFile(matching: { $0.hasSuffix("-cli.log") })
         if newestCLI != cliURL {
             // Day rolled over or first run: drain the file we were on, then switch.
-            if let cli { events += cli.readNewEvents() }
+            if let cli {
+                events += cli.readNewEvents()
+                if let seen = cli.lastWorkerLineAt {
+                    lastWorkerLineAt = max(lastWorkerLineAt ?? .distantPast, seen)
+                }
+            }
             cliURL = newestCLI
             cli = newestCLI.map { FollowedFile(url: $0, bootstrapBytes: cliBootstrapBytes) }
         }
@@ -186,6 +200,9 @@ final class LogTailer {
         if let cli { events += cli.readNewEvents() }
         if let main { events += main.readNewEvents() }
 
+        if let seen = cli?.lastWorkerLineAt {
+            lastWorkerLineAt = max(lastWorkerLineAt ?? .distantPast, seen)
+        }
         return events.sorted { $0.timestamp < $1.timestamp }
     }
 

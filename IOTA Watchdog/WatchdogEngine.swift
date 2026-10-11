@@ -96,6 +96,9 @@ enum WatchdogState: Equatable {
     /// Registered mid-epoch, so it cannot train until the run's next full synchronisation.
     /// Restarting here is actively harmful: it would miss that sync and wait for the one after.
     case waitingForSync(until: Date)
+    /// Waiting in the orchestrator's registration queue for a place in a run. Healthy, and
+    /// quiet by nature: the miner only polls its queue status. Never restarted for that.
+    case queued(position: Int?)
     /// The miner is not running.
     case stopped
     /// The user stopped it, or cancelled a restart. No automatic action.
@@ -120,7 +123,7 @@ enum WatchdogState: Equatable {
     var isProblem: Bool {
         switch self {
         case .stopped, .frozen, .notProgressing, .needsAttention: return true
-        case .training, .otherPhase, .settling, .waitingForSync, .stoppedByUser,
+        case .training, .otherPhase, .settling, .waitingForSync, .queued, .stoppedByUser,
              .networkOutage, .paused, .unknown:
             return false
         case .runStalled:
@@ -199,6 +202,14 @@ final class WatchdogEngine: ObservableObject {
 
     // Evidence from the logs.
     private(set) var lastLogEventAt: Date?
+    /// When the Python worker last wrote any line, recognised by the parser or not.
+    private(set) var lastWorkerOutputAt: Date?
+    /// The latest registration-queue status from the orchestrator (`queued`, `expired`, …).
+    private(set) var queueStatus: String?
+    /// The position that came with it.
+    private(set) var reportedQueuePosition: Int?
+    /// When the queue status was last reported. The miner polls about once a minute.
+    private(set) var queueStatusAt: Date?
     private(set) var lastProgressAt: Date?
     private(set) var lastHeartbeatAt: Date?
     private(set) var lastPhase: MinerPhase = .training
@@ -292,10 +303,12 @@ final class WatchdogEngine: ObservableObject {
                 // over. It still marks when the miner joined the run, for the sync rule.
                 lastRegisteredAt = event.timestamp
                 lastPhase = .training
+                clearQueue()
                 record("Registered in a run\(prefix.isEmpty ? "" : " as \(prefix)")", notable: true)
 
             case .minerStarting, .processSpawned:
                 lastStartAt = event.timestamp
+                clearQueue()
                 lastShutdownAt = nil
                 lastFatal = nil
                 userStopped = false
@@ -325,6 +338,7 @@ final class WatchdogEngine: ObservableObject {
 
             case .shutdownComplete, .processExited:
                 lastShutdownAt = event.timestamp
+                clearQueue()
                 record("Miner shut down", notable: true)
 
             case .controlStopRequested:
@@ -349,6 +363,30 @@ final class WatchdogEngine: ObservableObject {
 
             case .joiningWaitlist:
                 joinedWaitlistAt = event.timestamp
+
+            case .registrationQueue(let status, let position):
+                // Positions move every poll, often by hundreds, so only status changes are
+                // worth a line in the history.
+                if status != queueStatus {
+                    switch status {
+                    case "queued":
+                        record("Joined the registration queue" + (position.map { " at #\($0)" } ?? ""),
+                               notable: true)
+                    case "expired":
+                        record("Queue place expired; the miner joins again", notable: true)
+                    default:
+                        record("Registration queue: \(status)", notable: true)
+                    }
+                }
+                queueStatus = status
+                reportedQueuePosition = position
+                queueStatusAt = event.timestamp
+                // In the queue means in no run: forget the last one so the menu does not
+                // claim the miner is queueing for a run it has already left.
+                namedRunID = nil
+
+            case .notRegistered:
+                namedRunID = nil
 
             case .queueState(let detail):
                 // The worker advertises this capability but has never emitted one here, so the
@@ -378,6 +416,7 @@ final class WatchdogEngine: ObservableObject {
     /// Returns nil unless the payload actually contains a position, which it never has on any
     /// log seen so far. Showing an invented number would be worse than showing nothing.
     var queuePosition: Int? {
+        if isQueued, let reportedQueuePosition { return reportedQueuePosition }
         guard let payload = lastQueueState else { return nil }
         for key in ["position", "place", "rank", "index"] {
             guard let range = payload.range(of: key) else { continue }
@@ -387,6 +426,29 @@ final class WatchdogEngine: ObservableObject {
             if let value = Int(digits) { return value }
         }
         return nil
+    }
+
+    /// Records that the worker wrote something, whether or not it parsed into an event.
+    func noteWorkerOutput(at date: Date) {
+        lastWorkerOutputAt = max(lastWorkerOutputAt ?? .distantPast, date)
+    }
+
+    /// The most recent sign of life in the miner's log: a recognised event, or any worker line.
+    var lastLogActivityAt: Date? {
+        [lastLogEventAt, lastWorkerOutputAt].compactMap { $0 }.max()
+    }
+
+    /// True while the orchestrator says the miner is queued, and said so recently. A queue that
+    /// has stopped reporting is no longer an excuse, so the ordinary rules apply again.
+    var isQueued: Bool {
+        guard queueStatus == "queued", let at = queueStatusAt else { return false }
+        return now().timeIntervalSince(at) < 10 * 60
+    }
+
+    private func clearQueue() {
+        queueStatus = nil
+        reportedQueuePosition = nil
+        queueStatusAt = nil
     }
 
     /// Records the latest local process observation.
@@ -524,9 +586,23 @@ final class WatchdogEngine: ObservableObject {
             return suppressedRestartForStalledRun(at: currentTime)
         }
 
+        // --- Waiting in the registration queue. ---
+        //
+        // A queued miner is healthy and has nothing to do but poll its place. On 2026-10-11 the
+        // watchdog restarted one that had been queued for two hours, calling it frozen, because
+        // none of its queue lines were ones the parser recognised. Placed before every rule that
+        // judges a live worker. If the queue stops reporting, `isQueued` lapses after ten minutes
+        // and those rules apply again.
+        if isQueued {
+            state = .queued(position: reportedQueuePosition)
+            return .doNothing
+        }
+
         // --- Rule 3: alive but writing nothing. ---
-        if let lastLogEventAt {
-            let logAge = currentTime.timeIntervalSince(lastLogEventAt)
+        //
+        // "Nothing" means no line at all from the worker, not merely no line the parser knows.
+        if let lastActivity = lastLogActivityAt {
+            let logAge = currentTime.timeIntervalSince(lastActivity)
             if logAge >= config.frozenThreshold {
                 if outageActive {
                     state = .networkOutage
