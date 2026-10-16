@@ -53,6 +53,14 @@ enum LogEventKind: Equatable {
     /// `/miner/get_run_config` answered `EntityNotRegisteredError`: the miner is in no run.
     case notRegistered
 
+    /// `Broadcast peer status: 18/36 ok, 18 unreachable in 5002ms …`, about every 10 seconds.
+    /// How many of the other miners in the run this one can currently reach.
+    case peerStatus(reachable: Int, total: Int)
+
+    /// `Failed to send forward activation <id> (connect timeout after 5s), dropping`.
+    /// Finished work thrown away because the next miner could not be reached.
+    case forwardActivationDropped
+
     /// A `register.queue_state` message from the worker's local node protocol, with whatever
     /// payload it carried. The worker advertises this capability on every connection but has
     /// never emitted one here, so the payload shape is unknown and is kept verbatim.
@@ -249,6 +257,23 @@ struct LogParser {
                                          expected: MinerPhase(rawValue: expected ?? ""))
             }
         }
+
+        // --- Contact with the other miners. ---
+        //
+        // Both lines are also on the noise list, where they were ignored as routine. Singly
+        // they are; sustained, they are how a miner cut off from its peers looks (2026-10-16:
+        // 0/36 reachable for hours, every finished activation dropped). Read them here, before
+        // the noise filter, and let the engine judge the pattern.
+
+        if let range = body.range(of: "Broadcast peer status: ") {
+            let counts = body[range.upperBound...].prefix { $0.isNumber || $0 == "/" }
+                .split(separator: "/")
+            if counts.count == 2, let reachable = Int(counts[0]), let total = Int(counts[1]) {
+                return .peerStatus(reachable: reachable, total: total)
+            }
+        }
+
+        if body.contains("Failed to send forward activation") { return .forwardActivationDropped }
 
         // --- Registration queue. ---
 

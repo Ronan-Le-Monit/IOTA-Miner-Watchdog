@@ -42,6 +42,8 @@ extension WatchdogState {
         case .runStalled(let hours):
             return String(format: "Run has stalled (%.0fh since it synced)", hours)
         case .needsAttention(let reason): return "Needs attention (\(reason))"
+        case .cutOffFromPeers(let reachable, let total):
+            return "Cut off from other miners (\(reachable)/\(total))"
         case .paused: return "Paused"
         case .unknown: return "Checking…"
         }
@@ -53,7 +55,7 @@ extension WatchdogState {
         case .training: return Theme.activeGreen
         case .otherPhase, .settling, .waitingForSync, .queued: return Color(hex: 0xFBBF24)
         case .stopped, .frozen, .needsAttention: return Theme.inactiveRed
-        case .notProgressing, .runStalled: return Color(hex: 0xFB923C)
+        case .notProgressing, .runStalled, .cutOffFromPeers: return Color(hex: 0xFB923C)
         case .networkOutage: return Color(hex: 0xFB923C)
         case .stoppedByUser, .paused, .unknown: return Theme.mutedText
         }
@@ -72,6 +74,7 @@ extension WatchdogState {
         case .notProgressing: return "exclamationmark.circle"
         case .networkOutage: return "wifi.slash"
         case .runStalled: return "exclamationmark.arrow.trianglehead.2.clockwise.rotate.90"
+        case .cutOffFromPeers: return "network.slash"
         case .needsAttention: return "exclamationmark.octagon.fill"
         case .stoppedByUser: return "pause.circle"
         case .paused: return "pause.circle.fill"

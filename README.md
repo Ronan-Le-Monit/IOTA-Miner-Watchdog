@@ -34,6 +34,7 @@ By default it restarts the miner only on direct evidence that something has stop
 | Fatal error | The miner logs a critical error; the watchdog waits up to 5 minutes for it to finish cleaning up and shut down |
 | Worker vanished | No worker process for two consecutive checks |
 | Frozen | The process is alive but has written nothing at all for 5 minutes |
+| Cut off from other miners | For 15 minutes it reached 15% or fewer of the other miners, and finished work was being dropped |
 | App quit | IOTA Train at Home is not running at all, so it is relaunched |
 
 The shutdown line is the most important of these. The IOTA app never restarts a miner that has
@@ -43,6 +44,16 @@ watchdog gives the process 60 seconds to exit after that line and then restarts 
 because the miner process can stay listed after training has ended. A shutdown is acted on even
 straight after a start, and even when the run itself looks dead: a miner that has shut down is not
 training either way.
+
+A miner can also **lose contact with the other miners** while staying alive and busy. On
+16 October a MacBook here reached 0 of 36 peers for hours, and every activation it finished was
+dropped because it could not be handed on; it was credited a quarter of the work of a Mac Mini on
+the same router. Cables, adapters, switches and Wi-Fi were all ruled out. Restarting the miner
+fixed it within a minute. A healthy miner reaches roughly half its peers or more, and a network
+change only drops the count to zero for under a minute, so the rule needs fifteen minutes of
+near-zero contact *and* dropped work before it acts. If one restart does not reconnect the miner,
+it does not try again for two hours: the cause is then outside the Mac, and repeated restarts
+would only add re-registration time. The menu shows `Peers reachable` at all times.
 
 A miner **waiting in the registration queue** is never restarted. While queued it does nothing
 but poll its place, about once a minute, and the menu shows `Queued — position #38`. On

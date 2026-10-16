@@ -115,6 +115,11 @@ struct MenuView: View {
             }
             row("Miner process", coordinator.workerText)
             row("Log age", formatAge(coordinator.logAge))
+            // How many of the run's other miners this one can reach. Healthy is roughly half or
+            // more; a miner that cannot reach them has its finished work dropped.
+            if let peers = engine.latestPeerReport, peers.total > 0 {
+                row("Peers reachable", "\(peers.reachable)/\(peers.total) (\(Int(peers.fraction * 100))%)")
+            }
             row("Last activation", formatAge(engine.lastProgressAt.map { Date().timeIntervalSince($0) }))
             // Say what will happen and when, rather than looking idle while a timer runs down.
             if let deadline = engine.noProgressDeadline,

@@ -203,7 +203,6 @@ final class LogParserTests: XCTestCase {
             "[2026-09-04 10:30:00.000] [info]  2026-09-04 10:30:00.000 | ERROR    | subnet.utils.vector_utils:check_for_nans_and_infs:137 - ❌ Miner has NaNs in Loss for miner 5TESTAAA | 1 / 1 = 100.00%",
             "[2026-09-04 10:30:01.000] [info]  2026-09-04 10:30:01.000 | ERROR    | subnet.common_api_client:orchestrator_request:109 - Failed request after 3 attempts: 400, {\"detail\":{\"error\":\"Request is too stale\",\"message\":\"EpistulaError: Request is too stale\",\"name\":\"EpistulaError\"}}",
             "[2026-09-04 10:30:02.000] [info]  2026-09-04 10:30:02.000 | ERROR    | subnet.common_api_client:orchestrator_request:97 - Error making orchestrator request to endpoint /miner/submit_activation: 400 - {\"detail\":\"attestation_required\"}",
-            "[2026-09-04 15:10:10.142] [info]  2026-09-04 15:10:10.142 | WARNING  | miner.new_miner:_broadcast_peer_status:568 - Broadcast peer status: 28/37 ok, 9 unreachable in 5004ms | errors: TimeoutError=9 | sample: [5PEERBBB (relay=y, direct=4) -> TimeoutError: ]",
             "[2026-09-04 10:30:04.000] [info]  2026-09-04 10:30:04.000 | WARNING  | subnet.model.utils:log_gpu_memory_usage:41 - High GPU memory usage detected: 71GB -- after forward pass",
             "[2026-09-04 12:37:22.256] [info]  2026-09-04 12:37:22.256 | WARNING  | miner.utils.node_control_mixin:register_set_queue_state:221 - register_set_queue_state exhausted retries (3): POST /register/queue_state failed 503",
             "[2026-09-04 10:30:06.000] [info]  PNP retry 2/5: RuntimeError: connect timeout after 10s — backoff 1.5s",
@@ -220,6 +219,14 @@ final class LogParserTests: XCTestCase {
 
     /// "Skipping backward … due to loss/target fetch error" is an ERROR line but the miner
     /// carries on with the next activation.
+    /// Was on the noise list until 1.6. One report is still nothing to worry about, but the
+    /// engine now reads every one: sustained near-zero counts are how a miner cut off from its
+    /// peers looks. See PeerLossTests.
+    func testAPeerStatusReportIsReadNotIgnored() throws {
+        let line = "[2026-09-04 15:10:10.142] [info]  2026-09-04 15:10:10.142 | WARNING  | miner.new_miner:_broadcast_peer_status:568 - Broadcast peer status: 28/37 ok, 9 unreachable in 5004ms | errors: TimeoutError=9 | sample: [5PEERBBB (relay=y, direct=4) -> TimeoutError: ]"
+        XCTAssertEqual(try XCTUnwrap(parser.parse(line)).kind, .peerStatus(reachable: 28, total: 37))
+    }
+
     func testSkippedBackwardIsNotFatal() {
         let line = "[2026-09-04 10:30:12.000] [info]  2026-09-04 10:30:12.000 | ERROR    | miner.training.training:_run_backward_slices:513 - Skipping backward for activation e06bb534-22a5-424f-9aa2-54e9910d4302 due to loss/target fetch error: Loss for miner 5TESTAAA has NaNs"
         XCTAssertNil(parser.parse(line))

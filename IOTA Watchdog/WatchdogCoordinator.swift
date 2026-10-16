@@ -277,6 +277,11 @@ final class WatchdogCoordinator: ObservableObject {
             return engine.events.last(where: \.isNotable)?.text ?? trigger.detail
         case .frozen, .noProgress, .resetLoop:
             return trigger.detail
+        case .peersLost:
+            guard let lost = engine.peerLossEvidence(at: Date()) else { return trigger.detail }
+            return "Only \(lost.reachable) of \(lost.total) other miners reachable; "
+                + "\(lost.dropped) finished activations dropped in the last "
+                + "\(Int(engine.config.peerLossWindow / 60)) minutes."
         }
     }
 
