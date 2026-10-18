@@ -47,7 +47,12 @@ struct WatchdogConfig: Equatable {
     var peerLossMaxFraction: Double = 0.15
     /// At least this many reports inside the window, so the evidence is continuous.
     var peerLossMinReports = 10
-    /// At least this many activations dropped inside the window: proof the work is wasted.
+    /// Proof the time is wasted: at least this many activations dropped inside the window,
+    /// *or* none submitted at all. The second half was added in 1.7 after the Mac Mini, on
+    /// 2026-10-18, lost its peers and simply stopped working, dropping only 2 activations in
+    /// the process. 1.6 never fired; the orchestrator dropped the miner 40 minutes later and it
+    /// queued for 4 h 22 min. The three cut-offs before it, caught and restarted while still
+    /// registered, each rejoined their run with no queue.
     var peerLossMinDropped = 3
     /// After a restart for peer loss that did not reconnect, wait this long before another.
     var peerLossRetryAfter: TimeInterval = 2 * 60 * 60
@@ -185,7 +190,7 @@ enum RestartTrigger: Equatable {
             return "Reset and re-registered \(count) times in \(minutes) minutes without training."
         case .peersLost(let minutes):
             return "For \(minutes) minutes it reached almost none of the other miners, "
-                + "and finished work was being dropped."
+                + "and its work was being dropped or had stopped."
         }
     }
 }
@@ -244,6 +249,8 @@ final class WatchdogEngine: ObservableObject {
     private(set) var peerReports: [PeerReport] = []
     /// When finished activations were dropped for want of a reachable peer.
     private(set) var droppedActivationTimes: [Date] = []
+    /// When activations were submitted, for the "no work at all" half of the peer-loss proof.
+    private(set) var submittedActivationTimes: [Date] = []
     /// Set when a restart for peer loss begins; cleared once a healthy report shows the
     /// restart worked. While set, a second peer-loss restart is held back.
     private(set) var peerLossRestartAt: Date?
@@ -324,6 +331,10 @@ final class WatchdogEngine: ObservableObject {
                 // the move *into* weights_uploading but almost never the move back.
                 lastPhase = .training
                 noteProgress(at: event.timestamp)
+                submittedActivationTimes.append(event.timestamp)
+                submittedActivationTimes.removeAll {
+                    event.timestamp.timeIntervalSince($0) > config.peerLossWindow * 2
+                }
 
             case .trainingState(.trainingTick):
                 // Deliberately NOT progress. A miner stuck in a reset/re-register loop emits a
@@ -355,6 +366,7 @@ final class WatchdogEngine: ObservableObject {
                 // A new process has new connections; the old one's reports say nothing about it.
                 peerReports.removeAll()
                 droppedActivationTimes.removeAll()
+                submittedActivationTimes.removeAll()
                 lastShutdownAt = nil
                 lastFatal = nil
                 userStopped = false
@@ -509,8 +521,9 @@ final class WatchdogEngine: ObservableObject {
 
     /// The peer-loss evidence, if the last `peerLossWindow` meets every condition: reports all
     /// the way through it, every one of them at or below `peerLossMaxFraction`, enough of them,
-    /// the latest still current, and work being dropped. Nil otherwise.
-    func peerLossEvidence(at date: Date) -> (reachable: Int, total: Int, dropped: Int)? {
+    /// the latest still current, and the time wasted: work dropped, or no work at all. Nil
+    /// otherwise.
+    func peerLossEvidence(at date: Date) -> (reachable: Int, total: Int, dropped: Int, submitted: Int)? {
         let start = date.addingTimeInterval(-config.peerLossWindow)
         // Reports must reach back to the start of the window, not merely exist inside it,
         // so a watchdog that has only just started cannot conclude anything from a few minutes.
@@ -521,8 +534,10 @@ final class WatchdogEngine: ObservableObject {
               inWindow.allSatisfy({ $0.total > 0 && $0.fraction <= config.peerLossMaxFraction })
         else { return nil }
         let dropped = droppedActivationTimes.filter { $0 >= start }.count
-        guard dropped >= config.peerLossMinDropped else { return nil }
-        return (last.reachable, last.total, dropped)
+        let submitted = submittedActivationTimes.filter { $0 >= start }.count
+        // A miner still handing work on, however few peers it sees, is not wasting its time.
+        guard dropped >= config.peerLossMinDropped || submitted == 0 else { return nil }
+        return (last.reachable, last.total, dropped, submitted)
     }
 
     private func clearQueue() {

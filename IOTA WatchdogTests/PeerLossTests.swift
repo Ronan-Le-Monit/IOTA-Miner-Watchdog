@@ -73,13 +73,14 @@ final class PeerLossBehaviourTests: XCTestCase {
         return false
     }
 
-    /// `minutes` of reports every 10 s, with the worker visibly alive, and `dropEvery` seconds
-    /// between dropped activations (0 for none).
-    private func run(minutes: Int, reachable: Int, total: Int, dropEvery: Int = 60) {
+    /// `minutes` of reports every 10 s, with the worker visibly alive; `dropEvery` and
+    /// `submitEvery` are the seconds between dropped and submitted activations (0 for none).
+    private func run(minutes: Int, reachable: Int, total: Int, dropEvery: Int = 60, submitEvery: Int = 0) {
         for second in stride(from: 0, to: minutes * 60, by: 10) {
             clock.advance(10)
             engine.ingest([event(.peerStatus(reachable: reachable, total: total))])
             if dropEvery > 0, second % dropEvery == 0 { engine.ingest([event(.forwardActivationDropped)]) }
+            if submitEvery > 0, second % submitEvery == 0 { engine.ingest([event(.submitActivation)]) }
             engine.noteWorkerOutput(at: clock.current)
             engine.ingest(running())
         }
@@ -112,9 +113,30 @@ final class PeerLossBehaviourTests: XCTestCase {
         XCTAssertFalse(proposes(engine.evaluate()))
     }
 
-    /// Low counts with nothing lost is not yet proof of wasted work.
-    func testFewPeersButNothingDroppedIsNotEnough() {
-        run(minutes: 20, reachable: 1, total: 36, dropEvery: 0)
+    /// Few peers, but work still being handed on: the miner is not wasting its time.
+    func testFewPeersWhileWorkStillFlowsIsLeftAlone() {
+        run(minutes: 20, reachable: 1, total: 36, dropEvery: 0, submitEvery: 30)
+        XCTAssertFalse(proposes(engine.evaluate()))
+    }
+
+    /// 1.7: the Mac Mini on 2026-10-18. Cut off, it dropped only 2 activations and then simply
+    /// stopped working. 1.6 needed 3 drops and never fired; the orchestrator dropped the miner
+    /// 40 minutes later and it queued for 4 h 22 min.
+    func testAMinerThatStoppedWorkingWhileCutOffIsRestarted() {
+        engine.ingest([event(.forwardActivationDropped)])
+        run(minutes: 1, reachable: 7, total: 60, dropEvery: 0)
+        engine.ingest([event(.forwardActivationDropped)])
+        run(minutes: 15, reachable: 2, total: 69, dropEvery: 0)
+        XCTAssertTrue(proposes(engine.evaluate()))
+        XCTAssertEqual(engine.state, .cutOffFromPeers(reachable: 2, total: 69))
+        XCTAssertEqual(engine.peerLossEvidence(at: clock.current)?.submitted, 0)
+    }
+
+    /// One submission inside the window is still work, so "no work" needs none at all.
+    func testASingleSubmissionMeansWorkHasNotStopped() {
+        run(minutes: 8, reachable: 2, total: 69, dropEvery: 0)
+        engine.ingest([event(.submitActivation)])
+        run(minutes: 8, reachable: 2, total: 69, dropEvery: 0)
         XCTAssertFalse(proposes(engine.evaluate()))
     }
 
@@ -178,6 +200,7 @@ final class PeerLossBehaviourTests: XCTestCase {
         engine.ingest([event(.minerStarting)])
         XCTAssertTrue(engine.peerReports.isEmpty)
         XCTAssertTrue(engine.droppedActivationTimes.isEmpty)
+        XCTAssertTrue(engine.submittedActivationTimes.isEmpty)
     }
 
     func testTheMenuShowsTheLatestReport() {

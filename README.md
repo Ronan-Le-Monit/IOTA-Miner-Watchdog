@@ -34,7 +34,7 @@ By default it restarts the miner only on direct evidence that something has stop
 | Fatal error | The miner logs a critical error; the watchdog waits up to 5 minutes for it to finish cleaning up and shut down |
 | Worker vanished | No worker process for two consecutive checks |
 | Frozen | The process is alive but has written nothing at all for 5 minutes |
-| Cut off from other miners | For 15 minutes it reached 15% or fewer of the other miners, and finished work was being dropped |
+| Cut off from other miners | For 15 minutes it reached 15% or fewer of the other miners, and its work was being dropped or had stopped |
 | App quit | IOTA Train at Home is not running at all, so it is relaunched |
 
 The shutdown line is the most important of these. The IOTA app never restarts a miner that has
@@ -51,7 +51,11 @@ dropped because it could not be handed on; it was credited a quarter of the work
 the same router. Cables, adapters, switches and Wi-Fi were all ruled out. Restarting the miner
 fixed it within a minute. A healthy miner reaches roughly half its peers or more, and a network
 change only drops the count to zero for under a minute, so the rule needs fifteen minutes of
-near-zero contact *and* dropped work before it acts. If one restart does not reconnect the miner,
+near-zero contact *and* proof the time is wasted: finished work being dropped, or no work at all.
+That second half was added after a Mac Mini here was cut off on 18 October, dropped only two
+activations and then simply stopped working. Nothing restarted it; forty minutes later the
+network dropped it from its run and it queued for over four hours. The three cut-offs before it,
+restarted while the miner was still registered, each rejoined their run straight away. If one restart does not reconnect the miner,
 it does not try again for two hours: the cause is then outside the Mac, and repeated restarts
 would only add re-registration time. The menu shows `Peers reachable` at all times.
 
