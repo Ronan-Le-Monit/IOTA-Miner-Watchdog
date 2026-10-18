@@ -119,6 +119,13 @@ enum WatchdogState: Equatable {
     case queued(position: Int?)
     /// Alive and working, but unable to reach the other miners, so its work is being dropped.
     case cutOffFromPeers(reachable: Int, total: Int)
+    /// Through the queue and being placed in a run: `confirming`, `confirmed`, `processing`.
+    /// Still in no run, and still not something a restart can speed up.
+    case joiningRun(status: String)
+    /// Running, but the orchestrator says it is in no run (`EntityNotRegistered`).
+    case notInRun
+    /// Running, but nothing shows it is training: no activation and no heartbeat recently.
+    case idle
     /// The miner is not running.
     case stopped
     /// The user stopped it, or cancelled a restart. No automatic action.
@@ -143,7 +150,8 @@ enum WatchdogState: Equatable {
     var isProblem: Bool {
         switch self {
         case .stopped, .frozen, .notProgressing, .needsAttention, .cutOffFromPeers: return true
-        case .training, .otherPhase, .settling, .waitingForSync, .queued, .stoppedByUser,
+        case .training, .otherPhase, .settling, .waitingForSync, .queued, .joiningRun,
+             .notInRun, .idle, .stoppedByUser,
              .networkOutage, .paused, .unknown:
             return false
         case .runStalled:
@@ -262,6 +270,11 @@ final class WatchdogEngine: ObservableObject {
     }
     private(set) var lastProgressAt: Date?
     private(set) var lastHeartbeatAt: Date?
+    /// When the orchestrator last named this miner's run (heartbeat or run-config response).
+    /// Only a miner that is in a run gets these, so it is evidence of being in one.
+    private(set) var lastRunNamedAt: Date?
+    /// When the orchestrator last answered `EntityNotRegistered`.
+    private(set) var lastNotRegisteredAt: Date?
     private(set) var lastPhase: MinerPhase = .training
     private(set) var lastStartAt: Date?
     private(set) var lastShutdownAt: Date?
@@ -411,6 +424,7 @@ final class WatchdogEngine: ObservableObject {
                 outageEventTimes.append(event.timestamp)
 
             case .runNamed(let runID):
+                lastRunNamedAt = event.timestamp
                 // Every heartbeat carries this, so it is recorded only when it changes.
                 // A change is genuinely worth knowing: it is the only signal that the
                 // orchestrator has moved this miner to a different run.
@@ -425,15 +439,17 @@ final class WatchdogEngine: ObservableObject {
             case .registrationQueue(let status, let position):
                 // Positions move every poll, often by hundreds, so only status changes are
                 // worth a line in the history.
-                if status != queueStatus {
-                    switch status {
+                // By stage rather than by status: past the queue the orchestrator flips between
+                // `confirmed` and `processing` every minute or so (Mac Mini, 2026-10-18).
+                if queueStatus.map(Self.queueStage) != Self.queueStage(status) {
+                    switch Self.queueStage(status) {
                     case "queued":
                         record("Joined the registration queue" + (position.map { " at #\($0)" } ?? ""),
                                notable: true)
                     case "expired":
                         record("Queue place expired; the miner joins again", notable: true)
                     default:
-                        record("Registration queue: \(status)", notable: true)
+                        record("Through the queue; joining a run (\(status))", notable: true)
                     }
                 }
                 queueStatus = status
@@ -445,6 +461,7 @@ final class WatchdogEngine: ObservableObject {
 
             case .notRegistered:
                 namedRunID = nil
+                lastNotRegisteredAt = event.timestamp
 
             case .peerStatus(let reachable, let total):
                 let report = PeerReport(at: event.timestamp, reachable: reachable, total: total)
@@ -514,9 +531,42 @@ final class WatchdogEngine: ObservableObject {
 
     /// True while the orchestrator says the miner is queued, and said so recently. A queue that
     /// has stopped reporting is no longer an excuse, so the ordinary rules apply again.
+    ///
+    /// Every status except `expired` counts. 1.5 knew only `queued`; on 2026-10-18 the
+    /// orchestrator moved the Mac Mini on to `confirming`, `confirmed` and `processing`, and
+    /// the watchdog took that as the end of the queue and reported "Training" for a miner in
+    /// no run. A status not seen before is treated as still waiting, which is the safe side.
     var isQueued: Bool {
-        guard queueStatus == "queued", let at = queueStatusAt else { return false }
+        guard let status = queueStatus, status != "expired", let at = queueStatusAt else { return false }
         return now().timeIntervalSince(at) < 10 * 60
+    }
+
+    /// True when at least one activation was submitted after `date`.
+    func hasSubmitted(since date: Date) -> Bool {
+        submittedActivationTimes.contains { $0 > date }
+    }
+
+    /// The state for a miner that is demonstrably working.
+    private var workingState: WatchdogState {
+        lastPhase == .training ? .training : .otherPhase(lastPhase)
+    }
+
+    /// `queued`, `expired`, or `joining` for everything after the queue proper.
+    static func queueStage(_ status: String) -> String {
+        switch status {
+        case "queued", "expired": return status
+        default: return "joining"
+        }
+    }
+
+    /// Something in the last ten minutes that only a miner in a run, or training, produces:
+    /// a heartbeat, the orchestrator naming its run, or a submitted activation. A miner in no
+    /// run sends none of them (Mac Mini, 2026-10-18: zero for 40 minutes; the MacBook, in a
+    /// run, about four heartbeats a minute).
+    var hasRecentTrainingEvidence: Bool {
+        let latest = [lastHeartbeatAt, lastRunNamedAt, submittedActivationTimes.last].compactMap { $0 }.max()
+        guard let latest else { return false }
+        return now().timeIntervalSince(latest) < 10 * 60
     }
 
     /// The peer-loss evidence, if the last `peerLossWindow` meets every condition: reports all
@@ -646,12 +696,16 @@ final class WatchdogEngine: ObservableObject {
         }
 
         // --- Grace periods: never judge a settling miner. ---
+        //
+        // The grace blocks every restart rule below, but it must not hide a miner that is
+        // visibly working: on 2026-10-18 the MacBook read "Settling" for the full ten minutes
+        // while submitting activations from the sixth.
         if let lastStartAt, currentTime.timeIntervalSince(lastStartAt) < config.startupGrace {
-            state = .settling(reason: "just started")
+            state = hasSubmitted(since: lastStartAt) ? workingState : .settling(reason: "just started")
             return .doNothing
         }
         if let lastWakeAt, currentTime.timeIntervalSince(lastWakeAt) < config.wakeGrace {
-            state = .settling(reason: "Mac just woke")
+            state = hasSubmitted(since: lastWakeAt) ? workingState : .settling(reason: "Mac just woke")
             return .doNothing
         }
 
@@ -689,7 +743,9 @@ final class WatchdogEngine: ObservableObject {
         // judges a live worker. If the queue stops reporting, `isQueued` lapses after ten minutes
         // and those rules apply again.
         if isQueued {
-            state = .queued(position: reportedQueuePosition)
+            state = queueStatus == "queued"
+                ? .queued(position: reportedQueuePosition)
+                : .joiningRun(status: queueStatus ?? "")
             return .doNothing
         }
 
@@ -792,7 +848,15 @@ final class WatchdogEngine: ObservableObject {
         } else if isWaitingForSync, let next = nextSyncAt {
             state = .waitingForSync(until: next)
         } else {
-            state = lastPhase == .training ? .training : .otherPhase(lastPhase)
+            // "Training" must be earned. The last phase the miner reported can be hours old,
+            // and on 2026-10-18 it read "Training" for a miner that had been out of its run
+            // since 05:40.
+            if lastPhase == .training, !hasRecentTrainingEvidence {
+                let notInRun = lastNotRegisteredAt.map { currentTime.timeIntervalSince($0) < 10 * 60 } ?? false
+                state = notInRun ? .notInRun : .idle
+            } else {
+                state = lastPhase == .training ? .training : .otherPhase(lastPhase)
+            }
         }
         return .doNothing
     }
@@ -808,6 +872,10 @@ final class WatchdogEngine: ObservableObject {
     var isWaitingForSync: Bool {
         guard let joined = joinedRunAt, let lastSync = lastSyncAt else { return false }
         guard joined > lastSync else { return false }
+        // A miner that is already submitting activations is not waiting for anything. The sync
+        // estimate is only an estimate: on 2026-10-18 the MacBook trained from 10:43 while the
+        // watchdog still read "Waiting for network sync (~10:51)" at 10:47.
+        guard !hasSubmitted(since: joined) else { return false }
         guard let next = nextSyncAt else { return false }
         // Bounded on purpose. The estimate slides forward on every poll, so "wait until the
         // next estimate" is a wait that never ends. Once the miner has been queued for longer

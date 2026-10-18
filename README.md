@@ -148,6 +148,14 @@ It also names the run you are in and how full it is, for example `120 / 120 (ful
 the orchestrator assigns a run, and before the network lists you as a member, the same line reads
 **Queueing for** and names that run, which the watchdog reads from your own log.
 
+The status line only says **Training** when something shows the miner is: an activation or a
+heartbeat in the last ten minutes. Otherwise it says **Not in a run** (the orchestrator has said
+so), or **Idle — no training activity**. Past the queue, while the orchestrator is placing the
+miner (`confirming`, `confirmed`, `processing`), it reads **Joining a run**; that can take a
+while, and restarting does not hurry it. And a miner that is already submitting activations is
+shown as training straight away, even during the ten minutes after a start in which no restart
+rule is allowed to act.
+
 While the miner is queueing for a place, the menu shows its **queue position** as the
 orchestrator reports it. Expect it to jump around: on 11 October it went from #1029 to #341, then
 between roughly #190 and #890 for an hour and a half, before settling at #38. A place can also

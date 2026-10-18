@@ -12,6 +12,8 @@ extension WatchdogState {
     /// is worth a log line. A queue position moved by hundreds between polls on 2026-10-11.
     var logKey: WatchdogState {
         if case .queued = self { return .queued(position: nil) }
+        if case .joiningRun = self { return .joiningRun(status: "") }
+        if case .cutOffFromPeers = self { return .cutOffFromPeers(reachable: 0, total: 0) }
         return self
     }
 
@@ -30,6 +32,10 @@ extension WatchdogState {
         case .settling(let reason): return "Settling (\(reason))"
         case .queued(let position):
             return position.map { "Queued — position #\($0)" } ?? "Queued for a run"
+        case .joiningRun(let status):
+            return status.isEmpty ? "Joining a run" : "Joining a run (\(status))"
+        case .notInRun: return "Not in a run"
+        case .idle: return "Idle — no training activity"
         case .waitingForSync(let until):
             let formatter = DateFormatter()
             formatter.dateFormat = "HH:mm"
@@ -53,7 +59,8 @@ extension WatchdogState {
     var tint: Color {
         switch self {
         case .training: return Theme.activeGreen
-        case .otherPhase, .settling, .waitingForSync, .queued: return Color(hex: 0xFBBF24)
+        case .otherPhase, .settling, .waitingForSync, .queued, .joiningRun, .notInRun, .idle:
+            return Color(hex: 0xFBBF24)
         case .stopped, .frozen, .needsAttention: return Theme.inactiveRed
         case .notProgressing, .runStalled, .cutOffFromPeers: return Color(hex: 0xFB923C)
         case .networkOutage: return Color(hex: 0xFB923C)
@@ -70,6 +77,9 @@ extension WatchdogState {
         case .settling: return "clock"
         case .waitingForSync: return "clock.badge"
         case .queued: return "list.number"
+        case .joiningRun: return "arrow.right.circle"
+        case .notInRun: return "circle.dashed"
+        case .idle: return "moon.zzz"
         case .stopped, .frozen: return "exclamationmark.triangle.fill"
         case .notProgressing: return "exclamationmark.circle"
         case .networkOutage: return "wifi.slash"
